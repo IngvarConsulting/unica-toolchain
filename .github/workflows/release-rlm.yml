@@ -160,7 +160,7 @@ jobs:
           tag_name: ${{ needs.metadata.outputs.release_tag }}
           name: RLM tools BSL ${{ needs.metadata.outputs.release_tag }}
           body: |
-            Reproducible native RLM entrypoints for Unica.
+            Pinned native RLM entrypoints for Unica.
 
             Upstream: `${{ needs.metadata.outputs.upstream_repository }}`
             Tag: `${{ needs.metadata.outputs.upstream_tag }}`

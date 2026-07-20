@@ -1,6 +1,6 @@
 # Unica Toolchain
 
-Reproducible native builds of third-party runtime tools distributed with
+Pinned native builds of third-party runtime tools distributed with
 [Unica](https://github.com/IngvarConsulting/unica).
 
 The first toolchain target is `Dach-Coin/rlm-tools-bsl`. Its two Python console

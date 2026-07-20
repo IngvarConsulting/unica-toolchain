@@ -26,7 +26,7 @@ class BuildRlmContractTests(unittest.TestCase):
     def test_build_script_exists(self) -> None:
         self.assertTrue(SCRIPT.is_file(), f"missing build script: {SCRIPT}")
 
-    def test_manifest_defines_reproducible_release_identity(self) -> None:
+    def test_manifest_defines_pinned_release_identity(self) -> None:
         module = load_module()
         with tempfile.TemporaryDirectory() as tmp:
             manifest_path = Path(tmp) / "rlm.json"

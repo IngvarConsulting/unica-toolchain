@@ -119,6 +119,7 @@ class BuildRlmContractTests(unittest.TestCase):
 
             provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
             checksums = checksums_path.read_text(encoding="utf-8")
+            checksums_bytes = checksums_path.read_bytes()
 
         self.assertEqual(provenance["releaseTag"], "rlm-tools-bsl-v1.26.0-build.1")
         self.assertEqual(provenance["source"]["commit"], manifest["upstreamCommit"])
@@ -131,6 +132,7 @@ class BuildRlmContractTests(unittest.TestCase):
             hashlib.sha256(b"server").hexdigest(),
         )
         self.assertIn(hashlib.sha256(b"index").hexdigest(), checksums)
+        self.assertNotIn(b"\r\n", checksums_bytes)
 
     def test_builder_versions_must_match_manifest(self) -> None:
         module = load_module()

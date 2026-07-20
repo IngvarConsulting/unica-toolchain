@@ -242,12 +242,15 @@ def write_release_metadata(
     }
     provenance_path = out_dir / f"rlm-toolchain-{target}.json"
     provenance_path.write_text(
-        json.dumps(provenance, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        json.dumps(provenance, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+        newline="\n",
     )
     checksums_path = out_dir / f"checksums-{target}.txt"
     checksums_path.write_text(
         "".join(f"{entry['sha256']}  {entry['name']}\n" for entry in entries),
         encoding="utf-8",
+        newline="\n",
     )
     return provenance_path, checksums_path
 

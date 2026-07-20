@@ -23,7 +23,7 @@ class RepositoryContractTests(unittest.TestCase):
         module = load_build_module()
         manifest = module.load_manifest(REPO_ROOT / "manifests" / "rlm-tools-bsl.json")
         self.assertEqual(manifest["upstreamCommit"], "dcfff95ce678f49971b14d8acd82b042a6855470")
-        self.assertEqual(module.release_tag(manifest), "rlm-tools-bsl-v1.26.0-build.1")
+        self.assertEqual(module.release_tag(manifest), "rlm-tools-bsl-v1.26.0-build.2")
 
     def test_release_workflow_builds_only_on_explicit_dispatch(self) -> None:
         text = (REPO_ROOT / ".github" / "workflows" / "release-rlm.yml").read_text(encoding="utf-8")

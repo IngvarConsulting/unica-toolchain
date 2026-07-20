@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "name": "rlm-tools-bsl",
+  "version": "1.26.0",
+  "upstreamRepository": "https://github.com/Dach-Coin/rlm-tools-bsl",
+  "upstreamTag": "v1.26.0",
+  "upstreamCommit": "dcfff95ce678f49971b14d8acd82b042a6855470",
+  "pythonVersion": "3.12.10",
+  "uvVersion": "0.11.29",
+  "pyinstallerVersion": "6.21.0",
+  "buildRevision": 1
+}

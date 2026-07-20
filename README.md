@@ -1,38 +1,62 @@
 # Unica Toolchain
 
-Pinned native builds of third-party runtime tools distributed with
+Reproducible native builds of third-party tools distributed with
 [Unica](https://github.com/IngvarConsulting/unica).
 
-The first toolchain target is `Dach-Coin/rlm-tools-bsl`. Its two Python console
-entrypoints are frozen into native executables for Linux x64, Windows x64, and
-Apple silicon macOS.
+This repository owns the part of the supply chain that starts from a pinned
+upstream source revision and ends with immutable, checksummed native release
+assets. It is intentionally not tied to one upstream project: the current
+manifests cover `rlm-tools-bsl`, `bsl-analyzer`, and `v8-runner`, and the same
+contract can be extended to other Cargo or Python/PyInstaller tools.
 
 ## Release contract
 
-- Releases are built only by an explicit `workflow_dispatch`.
-- `manifests/rlm-tools-bsl.json` pins the upstream tag and commit, Python, uv,
-  PyInstaller, and the toolchain build revision.
-- Upstream runtime dependencies are installed from its committed `uv.lock`
-  using `uv sync --frozen`.
-- Every release contains six executable assets, per-platform checksum files,
+- Releases are built only by an explicit `workflow_dispatch` for one manifest.
+- Every manifest pins the upstream repository, tag, exact commit, licenses,
+  builder versions, target matrix, assets, smoke commands, and toolchain build
+  revision.
+- Optional repository-owned patches are applied in manifest order and verified
+  by SHA-256 before any build starts.
+- Python dependencies come from an upstream frozen `uv.lock`; Cargo builds use
+  the upstream lock file through `cargo build --locked`.
+- Each target produces normalized executable names, checksums, license assets,
   and machine-readable provenance.
-- Consumers must pin an immutable release tag and SHA-256. They must never
-  download `latest`.
+- A release is rejected if its tag already exists or if its file set differs
+  from the manifest-derived contract.
+- Consumers pin an immutable toolchain release tag and SHA-256; they never
+  download `latest` or rebuild an upstream project in their own CI.
 
-Release tags have the form `rlm-tools-bsl-v<upstream>-build.<revision>`.
+Release tags have the form `<tool>-v<upstream>-build.<revision>`. Each tool is
+released independently, so changing one manifest does not rebuild the others.
 
-## Updating RLM
+## Adding or updating a tool
 
-1. Update every pin in `manifests/rlm-tools-bsl.json`.
-2. Increment `buildRevision` when rebuilding the same upstream version.
-3. Open a pull request and wait for `Verify toolchain source`.
-4. Merge the pull request, then manually run `Build RLM release` on `main`.
-5. Verify all release assets and provenance before updating Unica's
-   `plugins/unica/third-party/tools.lock.json`.
+1. Add or update `manifests/<tool>.json`, including the exact upstream commit.
+2. Put required patches under `patches/<tool>/` and record each SHA-256 in the
+   manifest. Leave `patches` empty when the pinned source builds unchanged.
+3. Increment `buildRevision` when rebuilding the same upstream version.
+4. Open a pull request and wait for source, patch, license, schema, and workflow
+   validation.
+5. Merge the pull request, then manually run `Build tool release` on `main` with
+   the manifest name (without `.json`).
+6. Verify the assets, checksums, provenance, and native smoke command before
+   updating the consumer lock file.
 
 ## Local checks
 
 ```sh
 python3.12 -m unittest discover -s tests
-python3.12 -m py_compile scripts/*.py tests/*.py
+python3.12 -m py_compile scripts/*.py toolchain/*.py toolchain/builders/*.py tests/*.py
+actionlint
+```
+
+Source pins and declared license files can be verified without compiling a
+tool:
+
+```sh
+python3.12 scripts/toolchain.py validate-source \
+  --manifest manifests/bsl-analyzer.json \
+  --repo-root . \
+  --work-dir .build/source-bsl-analyzer \
+  --out-dir dist/source-bsl-analyzer
 ```

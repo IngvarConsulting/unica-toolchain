@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 2,
+  "name": "bsl-analyzer",
+  "version": "0.2.55",
+  "buildRevision": 1,
+  "source": {
+    "repository": "https://github.com/itrous/bsl-analyzer",
+    "tag": "v0.2.55",
+    "commit": "5a02bb44dedaf29e0e29af1f740279d279199854"
+  },
+  "license": {
+    "spdx": "LGPL-3.0-or-later",
+    "files": [
+      {"path": "LICENSE-APACHE", "assetName": "license-bsl-analyzer-APACHE.txt"},
+      {"path": "LICENSE-GPL", "assetName": "license-bsl-analyzer-GPL.txt"},
+      {"path": "LICENSE-LGPL", "assetName": "license-bsl-analyzer-LGPL.txt"},
+      {"path": "LICENSE-MIT", "assetName": "license-bsl-analyzer-MIT.txt"},
+      {"path": "NOTICE", "assetName": "notice-bsl-analyzer.txt"}
+    ]
+  },
+  "patches": [],
+  "builder": {
+    "kind": "cargo",
+    "rustVersion": "1.95.0",
+    "locked": true,
+    "binaries": [
+      {
+        "package": "bsl-analyzer",
+        "sourceName": "bsl-analyzer-app",
+        "assetBase": "bsl-analyzer",
+        "smokeArgs": ["--help"]
+      }
+    ]
+  },
+  "targets": {
+    "darwin-arm64": {
+      "runner": "macos-14",
+      "targetTriple": "aarch64-apple-darwin",
+      "exe": "",
+      "systemSetup": "none",
+      "environment": {}
+    },
+    "linux-x64": {
+      "runner": "ubuntu-latest",
+      "targetTriple": "x86_64-unknown-linux-gnu",
+      "exe": "",
+      "systemSetup": "none",
+      "environment": {}
+    },
+    "win-x64": {
+      "runner": "windows-latest",
+      "targetTriple": "x86_64-pc-windows-msvc",
+      "exe": ".exe",
+      "systemSetup": "none",
+      "environment": {
+        "CXXFLAGS": "/DMAP_FAILED=((void*)-1)",
+        "RUSTFLAGS": "-C target-feature=+crt-static"
+      }
+    }
+  }
+}

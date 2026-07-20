@@ -1,0 +1,211 @@
+name: Build tool release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tool:
+        description: Manifest name without the .json suffix
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  metadata:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      tool: ${{ steps.describe.outputs.tool }}
+      release_tag: ${{ steps.describe.outputs.release_tag }}
+      matrix: ${{ steps.describe.outputs.matrix }}
+      builder_kind: ${{ steps.describe.outputs.builder_kind }}
+      python_version: ${{ steps.describe.outputs.python_version }}
+      uv_version: ${{ steps.describe.outputs.uv_version }}
+      rust_version: ${{ steps.describe.outputs.rust_version }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - id: describe
+        name: Validate manifest and describe release
+        shell: bash
+        env:
+          TOOL_INPUT: ${{ inputs.tool }}
+        run: |
+          set -euo pipefail
+          manifest="manifests/${TOOL_INPUT}.json"
+          test -f "$manifest"
+          python scripts/toolchain.py describe --manifest "$manifest" > description.json
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          data = json.loads(Path("description.json").read_text(encoding="utf-8"))
+          versions = data["builderVersions"]
+          values = {
+              "tool": data["tool"],
+              "release_tag": data["releaseTag"],
+              "matrix": json.dumps(data["matrix"], separators=(",", ":")),
+              "builder_kind": data["builderKind"],
+              "python_version": versions.get("python", "3.12"),
+              "uv_version": versions.get("uv", ""),
+              "rust_version": versions.get("rust", ""),
+          }
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8", newline="\n") as stream:
+              for key, value in values.items():
+                  stream.write(f"{key}={value}\n")
+          PY
+      - name: Reject an existing immutable release identity
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.describe.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release already exists: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "tag already exists: refs/tags/$RELEASE_TAG" >&2
+            exit 1
+          fi
+      - name: Validate pinned source patches and licenses
+        shell: bash
+        env:
+          TOOL: ${{ steps.describe.outputs.tool }}
+        run: >-
+          python scripts/toolchain.py validate-source
+          --manifest "manifests/${TOOL}.json"
+          --repo-root .
+          --work-dir ".build/source-${TOOL}"
+          --out-dir "dist/source-${TOOL}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: source-metadata-${{ steps.describe.outputs.tool }}
+          path: dist/source-${{ steps.describe.outputs.tool }}
+          if-no-files-found: error
+          retention-days: 7
+
+  build:
+    needs: metadata
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.metadata.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ needs.metadata.outputs.python_version }}
+      - uses: astral-sh/setup-uv@v7
+        if: needs.metadata.outputs.builder_kind == 'python-pyinstaller'
+        with:
+          version: ${{ needs.metadata.outputs.uv_version }}
+          enable-cache: false
+      - name: Install exact Rust toolchain
+        if: needs.metadata.outputs.builder_kind == 'cargo'
+        shell: bash
+        env:
+          RUST_VERSION: ${{ needs.metadata.outputs.rust_version }}
+          RUST_TARGET: ${{ matrix.targetTriple }}
+        run: |
+          set -euo pipefail
+          rustup toolchain install "$RUST_VERSION" --profile minimal --target "$RUST_TARGET"
+          rustup default "$RUST_VERSION"
+          rustc --version
+      - name: Install musl build tools
+        if: runner.os == 'Linux' && matrix.systemSetup == 'musl-tools'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Build and smoke declared assets
+        shell: bash
+        env:
+          TOOL: ${{ needs.metadata.outputs.tool }}
+        run: >-
+          python scripts/toolchain.py build
+          --manifest "manifests/${TOOL}.json"
+          --repo-root .
+          --target "${{ matrix.target }}"
+          --work-dir ".build/${TOOL}-${{ matrix.target }}"
+          --out-dir "dist/${TOOL}-${{ matrix.target }}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tool-${{ needs.metadata.outputs.tool }}-${{ matrix.target }}
+          path: dist/${{ needs.metadata.outputs.tool }}-${{ matrix.target }}
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    needs: [metadata, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Require exact release file set
+        shell: bash
+        env:
+          TOOL: ${{ needs.metadata.outputs.tool }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          from toolchain.manifest import expected_release_files, load_manifest
+
+          tool = os.environ["TOOL"]
+          manifest = load_manifest(Path("manifests") / f"{tool}.json")
+          expected = expected_release_files(manifest)
+          actual = {path.name for path in Path("dist").iterdir() if path.is_file()}
+          if actual != expected:
+              missing = sorted(expected - actual)
+              unexpected = sorted(actual - expected)
+              raise SystemExit(f"release file mismatch; missing={missing}; unexpected={unexpected}")
+          PY
+      - name: Recheck immutable release identity
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.metadata.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release already exists: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "tag already exists: refs/tags/$RELEASE_TAG" >&2
+            exit 1
+          fi
+      - name: Attest native executables
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/*-darwin-arm64
+            dist/*-linux-x64
+            dist/*-win-x64.exe
+      - uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.metadata.outputs.release_tag }}
+          name: ${{ needs.metadata.outputs.release_tag }}
+          body: |
+            Pinned native build produced by IngvarConsulting/unica-toolchain.
+
+            See the per-target provenance JSON and checksum files attached to this release.
+          make_latest: false
+          fail_on_unmatched_files: true
+          files: dist/*

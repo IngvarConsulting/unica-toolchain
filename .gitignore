@@ -1,4 +1,5 @@
 .build/
+.worktrees/
 .venv/
 dist/
 __pycache__/

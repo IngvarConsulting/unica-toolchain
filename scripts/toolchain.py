@@ -152,15 +152,20 @@ def main() -> None:
         print(json.dumps(describe(manifest), separators=(",", ":")))
         return
     if args.command == "validate-source":
-        validate_source(manifest, args.repo_root.resolve(), args.work_dir, args.out_dir)
+        validate_source(
+            manifest,
+            args.repo_root.resolve(),
+            args.work_dir.resolve(),
+            args.out_dir.resolve(),
+        )
         return
     if args.command == "build":
         build(
             manifest,
             args.repo_root.resolve(),
             args.target,
-            args.work_dir,
-            args.out_dir,
+            args.work_dir.resolve(),
+            args.out_dir.resolve(),
         )
         return
     raise SystemExit(f"unsupported command: {args.command}")

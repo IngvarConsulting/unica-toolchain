@@ -149,6 +149,40 @@ class ToolchainCliTests(unittest.TestCase):
         cargo.assert_called_once()
         metadata.assert_called_once()
 
+    def test_main_resolves_relative_work_and_output_paths_before_build(self) -> None:
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        manifest_path = self.write_manifest(root)
+        module = load_script()
+        build = Mock()
+
+        with (
+            patch.object(module, "build", build),
+            patch.object(
+                sys,
+                "argv",
+                [
+                    "toolchain.py",
+                    "build",
+                    "--manifest",
+                    str(manifest_path),
+                    "--repo-root",
+                    ".",
+                    "--target",
+                    "darwin-arm64",
+                    "--work-dir",
+                    ".build/example",
+                    "--out-dir",
+                    "dist/example",
+                ],
+            ),
+        ):
+            module.main()
+
+        args = build.call_args.args
+        self.assertTrue(args[1].is_absolute())
+        self.assertTrue(args[3].is_absolute())
+        self.assertTrue(args[4].is_absolute())
+
 
 if __name__ == "__main__":
     unittest.main()

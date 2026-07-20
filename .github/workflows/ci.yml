@@ -16,11 +16,25 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - run: python -m unittest discover -s tests
-      - run: python -m py_compile scripts/*.py tests/*.py
+      - run: python -m py_compile scripts/*.py toolchain/*.py toolchain/builders/*.py tests/*.py
+      - name: Validate every pinned source and license set
+        shell: bash
+        run: |
+          set -euo pipefail
+          for manifest in manifests/*.json; do
+            tool="$(basename "$manifest" .json)"
+            python scripts/toolchain.py validate-source \
+              --manifest "$manifest" \
+              --repo-root . \
+              --work-dir ".build/ci-${tool}" \
+              --out-dir "dist/ci-${tool}"
+          done
+      - name: Validate GitHub Actions syntax
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7

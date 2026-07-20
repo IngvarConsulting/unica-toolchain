@@ -92,6 +92,36 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertFalse((REPO_ROOT / "scripts" / "build_rlm.py").exists())
         self.assertFalse((REPO_ROOT / "tests" / "test_build_rlm.py").exists())
 
+    def test_one_generic_release_workflow_builds_only_on_dispatch(self) -> None:
+        workflow = REPO_ROOT / ".github" / "workflows" / "release-tool.yml"
+        self.assertTrue(workflow.is_file())
+        self.assertFalse((REPO_ROOT / ".github" / "workflows" / "release-rlm.yml").exists())
+        text = workflow.read_text(encoding="utf-8")
+        trigger = text.split("permissions:", 1)[0]
+        self.assertIn("workflow_dispatch:", trigger)
+        self.assertIn("tool:", trigger)
+        self.assertNotIn("pull_request:", trigger)
+        self.assertNotIn("push:", trigger)
+        self.assertIn("scripts/toolchain.py describe", text)
+        self.assertIn("scripts/toolchain.py validate-source", text)
+        self.assertIn("scripts/toolchain.py build", text)
+        self.assertIn("fromJSON(needs.metadata.outputs.matrix)", text)
+        self.assertIn("gh release view", text)
+        self.assertIn("refs/tags/", text)
+        self.assertIn("expected_release_files", text)
+        self.assertIn("actions/attest-build-provenance@v2", text)
+        self.assertIn("softprops/action-gh-release@v3", text)
+        self.assertIn("make_latest: false", text)
+
+    def test_pull_request_ci_validates_sources_without_building_tools(self) -> None:
+        text = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn("python -m unittest discover -s tests", text)
+        self.assertIn("python -m py_compile scripts/*.py toolchain/*.py toolchain/builders/*.py tests/*.py", text)
+        self.assertIn("scripts/toolchain.py validate-source", text)
+        self.assertIn("manifests/*.json", text)
+        self.assertIn("rhysd/actionlint:1.7.7", text)
+        self.assertNotIn("scripts/toolchain.py build", text)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -108,10 +109,14 @@ def current_uv_version() -> str:
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
-    parts = result.stdout.strip().split()
-    if len(parts) != 2 or parts[0] != "uv":
-        raise SystemExit(f"cannot parse uv version: {result.stdout.strip()}")
-    return parts[1]
+    return parse_uv_version(result.stdout)
+
+
+def parse_uv_version(output: str) -> str:
+    match = re.match(r"^uv ([0-9]+\.[0-9]+\.[0-9]+)(?:\s|$)", output.strip())
+    if match is None:
+        raise SystemExit(f"cannot parse uv version: {output.strip()}")
+    return match.group(1)
 
 
 def resolve_entrypoint(command_name: str) -> tuple[str, str]:

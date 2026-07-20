@@ -153,6 +153,17 @@ class BuildRlmContractTests(unittest.TestCase):
                 pyinstaller_version="6.21.0",
             )
 
+    def test_uv_version_parser_accepts_platform_build_metadata(self) -> None:
+        module = load_module()
+        outputs = (
+            "uv 0.11.29 (x86_64-unknown-linux-gnu)",
+            "uv 0.11.29 (901092ee1 2026-07-15 aarch64-apple-darwin)",
+            "uv 0.11.29 (901092ee1 2026-07-15 x86_64-pc-windows-msvc)",
+        )
+        for output in outputs:
+            with self.subTest(output=output):
+                self.assertEqual(module.parse_uv_version(output), "0.11.29")
+
 
 if __name__ == "__main__":
     unittest.main()

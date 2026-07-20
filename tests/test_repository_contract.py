@@ -92,6 +92,9 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertFalse((REPO_ROOT / "scripts" / "build_rlm.py").exists())
         self.assertFalse((REPO_ROOT / "tests" / "test_build_rlm.py").exists())
 
+    def test_internal_superpowers_documents_are_not_published(self) -> None:
+        self.assertFalse((REPO_ROOT / "docs" / "superpowers").exists())
+
     def test_one_generic_release_workflow_builds_only_on_dispatch(self) -> None:
         workflow = REPO_ROOT / ".github" / "workflows" / "release-tool.yml"
         self.assertTrue(workflow.is_file())

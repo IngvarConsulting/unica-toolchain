@@ -1,11 +1,12 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "name": "bsl-analyzer",
   "version": "0.2.55",
   "buildRevision": 1,
   "source": {
+    "kind": "release",
     "repository": "https://github.com/itrous/bsl-analyzer",
-    "tag": "v0.2.55",
+    "ref": "v0.2.55",
     "commit": "5a02bb44dedaf29e0e29af1f740279d279199854"
   },
   "license": {

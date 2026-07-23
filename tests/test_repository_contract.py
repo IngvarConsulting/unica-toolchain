@@ -23,25 +23,29 @@ class RepositoryContractTests(unittest.TestCase):
     def test_checked_in_tools_have_independent_release_identities(self) -> None:
         expected = {
             "rlm-tools-bsl": (
+                "release",
                 "v1.26.0",
                 "dcfff95ce678f49971b14d8acd82b042a6855470",
                 "rlm-tools-bsl-v1.26.0-build.3",
             ),
             "bsl-analyzer": (
+                "release",
                 "v0.2.55",
                 "5a02bb44dedaf29e0e29af1f740279d279199854",
                 "bsl-analyzer-v0.2.55-build.1",
             ),
             "v8-runner": (
+                "nightly",
                 "master",
                 "72d346c0a8fcf8373d9388257d11e6bef0ad70b2",
-                "v8-runner-v0.5.1-build.2",
+                "v8-runner-nightly-master-build.1",
             ),
         }
-        for name, (tag, commit, release) in expected.items():
+        for name, (kind, ref, commit, release) in expected.items():
             with self.subTest(name=name):
                 manifest = self.load(name)
-                self.assertEqual(manifest.source.tag, tag)
+                self.assertEqual(manifest.source.kind, kind)
+                self.assertEqual(manifest.source.ref, ref)
                 self.assertEqual(manifest.source.commit, commit)
                 self.assertEqual(release_tag(manifest), release)
                 self.assertEqual(manifest.patches, ())

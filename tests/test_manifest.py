@@ -43,13 +43,14 @@ TARGETS = {
 
 def cargo_manifest() -> dict:
     return {
-        "schemaVersion": 2,
+        "schemaVersion": 3,
         "name": "v8-runner",
         "version": "0.5.1",
         "buildRevision": 1,
         "source": {
+            "kind": "release",
             "repository": "https://github.com/alkoleft/v8-runner-rust",
-            "tag": "v0.5.1",
+            "ref": "v0.5.1",
             "commit": "a" * 40,
         },
         "license": {
@@ -72,6 +73,18 @@ def cargo_manifest() -> dict:
         },
         "targets": copy.deepcopy(TARGETS),
     }
+
+
+def nightly_manifest(ref: str, commit: str = "a" * 40) -> dict:
+    data = cargo_manifest()
+    del data["version"]
+    data["source"] = {
+        "kind": "nightly",
+        "repository": "https://github.com/alkoleft/v8-runner-rust",
+        "ref": ref,
+        "commit": commit,
+    }
+    return data
 
 
 def python_manifest() -> dict:
@@ -138,6 +151,28 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(manifest.builder.python_version, "3.12.10")
         self.assertEqual(manifest.builder.binaries[0].module, "rlm_tools_bsl.server")
 
+    def test_generates_release_prerelease_and_nightly_tags(self) -> None:
+        prerelease = cargo_manifest()
+        prerelease["version"] = "0.5.2-pre.1"
+        prerelease["source"]["ref"] = "v0.5.2-pre.1"
+        self.assertEqual(
+            release_tag(load_manifest(self.write_manifest(prerelease))),
+            "v8-runner-v0.5.2-pre.1-build.1",
+        )
+        self.assertEqual(
+            release_tag(load_manifest(self.write_manifest(nightly_manifest("master")))),
+            "v8-runner-nightly-master-build.1",
+        )
+        self.assertEqual(
+            release_tag(load_manifest(self.write_manifest(nightly_manifest("feature/foo")))),
+            "v8-runner-nightly-feature-foo-build.1",
+        )
+        commit = "72d346c0a8fcf8373d9388257d11e6bef0ad70b2"
+        self.assertEqual(
+            release_tag(load_manifest(self.write_manifest(nightly_manifest(commit, commit)))),
+            "v8-runner-nightly-72d346c0a8fc-build.1",
+        )
+
     def test_rejects_invalid_contracts(self) -> None:
         cases = []
         schema = cargo_manifest()
@@ -171,6 +206,33 @@ class ManifestTests(unittest.TestCase):
         unknown = cargo_manifest()
         unknown["surprise"] = True
         cases.append((unknown, "unknown fields"))
+
+        source_kind = cargo_manifest()
+        source_kind["source"]["kind"] = "snapshot"
+        cases.append((source_kind, "source.kind"))
+
+        release_without_version = cargo_manifest()
+        del release_without_version["version"]
+        cases.append((release_without_version, "release source requires version"))
+
+        nightly_with_version = nightly_manifest("master")
+        nightly_with_version["version"] = "0.5.1"
+        cases.append((nightly_with_version, "nightly source forbids version"))
+
+        mismatched_release_ref = cargo_manifest()
+        mismatched_release_ref["source"]["ref"] = "v0.5.2"
+        cases.append((mismatched_release_ref, "must equal v0.5.1"))
+
+        invalid_prerelease = cargo_manifest()
+        invalid_prerelease["version"] = "0.5.2-pre/1"
+        invalid_prerelease["source"]["ref"] = "v0.5.2-pre/1"
+        cases.append((invalid_prerelease, "semantic version"))
+
+        empty_nightly_label = nightly_manifest("///")
+        cases.append((empty_nightly_label, "nightly source ref"))
+
+        different_commit_ref = nightly_manifest("b" * 40)
+        cases.append((different_commit_ref, "must equal source.commit"))
 
         for data, message in cases:
             with self.subTest(message=message):

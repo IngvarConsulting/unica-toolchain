@@ -11,15 +11,21 @@ TARGET_KEYS = frozenset({"darwin-arm64", "linux-x64", "win-x64"})
 SYSTEM_SETUPS = frozenset({"none", "musl-tools"})
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
-SEMVER = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+SEMVER = re.compile(
+    r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)"
+    r"(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)"
+    r"(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+)
 SAFE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 ENV_NAME = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 
 
 @dataclass(frozen=True)
 class SourceSpec:
+    kind: Literal["release", "nightly"]
     repository: str
-    tag: str
+    ref: str
     commit: str
 
 
@@ -85,7 +91,7 @@ BuilderSpec = CargoBuilderSpec | PythonBuilderSpec
 class ToolManifest:
     schema_version: int
     name: str
-    version: str
+    version: str | None
     build_revision: int
     source: SourceSpec
     license: LicenseSpec
@@ -125,7 +131,7 @@ def _string(value: Any, path: str) -> str:
 def _version(value: Any, path: str) -> str:
     result = _string(value, path)
     if not SEMVER.fullmatch(result):
-        raise SystemExit(f"{path} must be an exact three-part version")
+        raise SystemExit(f"{path} must be a semantic version")
     return result
 
 
@@ -144,15 +150,33 @@ def _strings(value: Any, path: str) -> tuple[str, ...]:
 
 def _load_source(value: Any) -> SourceSpec:
     data = _object(value, "source")
-    _fields(data, "source", required={"repository", "tag", "commit"})
+    _fields(data, "source", required={"kind", "repository", "ref", "commit"})
+    kind = data["kind"]
+    if kind not in ("release", "nightly"):
+        raise SystemExit("source.kind must be release or nightly")
     repository = _string(data["repository"], "source.repository")
-    tag = _string(data["tag"], "source.tag")
+    ref = _string(data["ref"], "source.ref")
     commit = _string(data["commit"], "source.commit")
     if not repository.startswith("https://github.com/"):
         raise SystemExit("source.repository must be an https://github.com URL")
     if not SHA40.fullmatch(commit):
         raise SystemExit("source.commit must be 40 lowercase hexadecimal characters")
-    return SourceSpec(repository, tag, commit)
+    if SHA40.fullmatch(ref) and ref != commit:
+        raise SystemExit("commit source.ref must equal source.commit")
+    return SourceSpec(kind, repository, ref, commit)
+
+
+def _nightly_ref_label(ref: str) -> str:
+    if SHA40.fullmatch(ref):
+        return ref[:12]
+    label = re.sub(r"[^a-z0-9]+", "-", ref.lower()).strip("-")
+    if not label:
+        raise SystemExit("nightly source ref has no release-safe characters")
+    return label
+
+
+def nightly_source_label(manifest: ToolManifest) -> str:
+    return _nightly_ref_label(manifest.source.ref)
 
 
 def _load_license(value: Any) -> LicenseSpec:
@@ -301,7 +325,6 @@ def load_manifest(path: Path) -> ToolManifest:
         required={
             "schemaVersion",
             "name",
-            "version",
             "buildRevision",
             "source",
             "license",
@@ -309,17 +332,32 @@ def load_manifest(path: Path) -> ToolManifest:
             "builder",
             "targets",
         },
+        optional={"version"},
     )
-    if root["schemaVersion"] != 2:
+    if root["schemaVersion"] != 3:
         raise SystemExit(f"unsupported manifest schemaVersion: {root['schemaVersion']}")
     if not isinstance(root["buildRevision"], int) or root["buildRevision"] < 1:
         raise SystemExit("buildRevision must be a positive integer")
+    source = _load_source(root["source"])
+    version_value = root.get("version")
+    if source.kind == "release":
+        if version_value is None:
+            raise SystemExit("release source requires version")
+        version = _version(version_value, "version")
+        expected_ref = f"v{version}"
+        if source.ref != expected_ref:
+            raise SystemExit(f"release source.ref must equal {expected_ref}")
+    else:
+        if version_value is not None:
+            raise SystemExit("nightly source forbids version")
+        _nightly_ref_label(source.ref)
+        version = None
     return ToolManifest(
-        schema_version=2,
+        schema_version=3,
         name=_name(root["name"], "name"),
-        version=_version(root["version"], "version"),
+        version=version,
         build_revision=root["buildRevision"],
-        source=_load_source(root["source"]),
+        source=source,
         license=_load_license(root["license"]),
         patches=_load_patches(root["patches"]),
         builder=_load_builder(root["builder"]),
@@ -328,7 +366,12 @@ def load_manifest(path: Path) -> ToolManifest:
 
 
 def release_tag(manifest: ToolManifest) -> str:
-    return f"{manifest.name}-v{manifest.version}-build.{manifest.build_revision}"
+    if manifest.source.kind == "release":
+        return f"{manifest.name}-v{manifest.version}-build.{manifest.build_revision}"
+    return (
+        f"{manifest.name}-nightly-{nightly_source_label(manifest)}"
+        f"-build.{manifest.build_revision}"
+    )
 
 
 def expected_asset_names(manifest: ToolManifest) -> set[str]:

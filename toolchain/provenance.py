@@ -34,11 +34,12 @@ def write_target_metadata(
         for asset in sorted(assets, key=lambda path: path.name)
     ]
     provenance = {
-        "schemaVersion": 2,
+        "schemaVersion": 3,
         "releaseTag": release_tag(manifest),
         "source": {
+            "kind": manifest.source.kind,
             "repository": manifest.source.repository,
-            "tag": manifest.source.tag,
+            "ref": manifest.source.ref,
             "commit": source.commit,
             "tree": source.tree,
             "patches": [

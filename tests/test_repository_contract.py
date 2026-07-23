@@ -33,9 +33,9 @@ class RepositoryContractTests(unittest.TestCase):
                 "bsl-analyzer-v0.2.55-build.1",
             ),
             "v8-runner": (
-                "v0.5.1",
-                "ad72f64222ab0a7e6dfd391adb437a956c0a2428",
-                "v8-runner-v0.5.1-build.1",
+                "master",
+                "72d346c0a8fcf8373d9388257d11e6bef0ad70b2",
+                "v8-runner-v0.5.1-build.2",
             ),
         }
         for name, (tag, commit, release) in expected.items():
@@ -66,6 +66,11 @@ class RepositoryContractTests(unittest.TestCase):
             },
         )
         self.assertEqual(runner.targets["linux-x64"].system_setup, "musl-tools")
+        self.assertEqual(runner.license.spdx, "AGPL-3.0-only")
+        self.assertEqual(
+            [item.asset_name for item in runner.license.files],
+            ["license-v8-runner-AGPL-3.0-only.txt"],
+        )
         self.assertEqual(
             expected_asset_names(runner),
             {

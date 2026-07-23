@@ -2,16 +2,16 @@
   "schemaVersion": 2,
   "name": "v8-runner",
   "version": "0.5.1",
-  "buildRevision": 1,
+  "buildRevision": 2,
   "source": {
     "repository": "https://github.com/alkoleft/v8-runner-rust",
-    "tag": "v0.5.1",
-    "commit": "ad72f64222ab0a7e6dfd391adb437a956c0a2428"
+    "tag": "master",
+    "commit": "72d346c0a8fcf8373d9388257d11e6bef0ad70b2"
   },
   "license": {
-    "spdx": "MIT",
+    "spdx": "AGPL-3.0-only",
     "files": [
-      {"path": "LICENSE", "assetName": "license-v8-runner-MIT.txt"}
+      {"path": "LICENSE", "assetName": "license-v8-runner-AGPL-3.0-only.txt"}
     ]
   },
   "patches": [],

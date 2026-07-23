@@ -12,7 +12,8 @@ contract can be extended to other Cargo or Python/PyInstaller tools.
 ## Release contract
 
 - Releases are built only by an explicit `workflow_dispatch` for one manifest.
-- Every manifest pins the upstream repository, tag, exact commit, licenses,
+- Every manifest declares an official release or nightly source identity and
+  pins the upstream repository, ref, exact commit, licenses,
   builder versions, target matrix, assets, smoke commands, and toolchain build
   revision.
 - Optional repository-owned patches are applied in manifest order and verified
@@ -26,15 +27,24 @@ contract can be extended to other Cargo or Python/PyInstaller tools.
 - Consumers pin an immutable toolchain release tag and SHA-256; they never
   download `latest` or rebuild an upstream project in their own CI.
 
-Release tags have the form `<tool>-v<upstream>-build.<revision>`. Each tool is
-released independently, so changing one manifest does not rebuild the others.
+Official release tags have the form
+`<tool>-v<version>-build.<revision>`, including prereleases such as
+`v8-runner-v0.5.2-pre.1-build.1`. Sources built from a branch, non-release tag,
+or exact commit use `<tool>-nightly-<source>-build.<revision>`, for example
+`v8-runner-nightly-master-build.1`. Direct commit sources use the first 12
+characters of the pinned SHA in the release name. Each tool is released
+independently, so changing one manifest does not rebuild the others.
 
 ## Adding or updating a tool
 
-1. Add or update `manifests/<tool>.json`, including the exact upstream commit.
+1. Add or update `manifests/<tool>.json`, including `source.kind`,
+   `source.ref`, and the exact upstream commit. Use `release` only for a
+   published version tag matching `v<version>`; use `nightly` for branches,
+   non-release tags, and direct commits.
 2. Put required patches under `patches/<tool>/` and record each SHA-256 in the
    manifest. Leave `patches` empty when the pinned source builds unchanged.
-3. Increment `buildRevision` when rebuilding the same upstream version.
+3. Increment `buildRevision` when rebuilding the same release version or
+   nightly source label.
 4. Open a pull request and wait for source, patch, license, schema, and workflow
    validation.
 5. Merge the pull request, then manually run `Build tool release` on `main` with

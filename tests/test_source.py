@@ -5,10 +5,16 @@ import json
 import subprocess
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from toolchain.manifest import load_manifest
-from toolchain.source import copy_license_assets, prepare_source, verify_source_commit
+from toolchain.source import (
+    checkout_source,
+    copy_license_assets,
+    prepare_source,
+    verify_source_commit,
+)
 
 
 def git(repo: Path, *args: str, capture: bool = False) -> str:
@@ -31,11 +37,14 @@ class SourcePipelineTests(unittest.TestCase):
         git(self.repo, "init", "-b", "main")
         git(self.repo, "config", "user.name", "CI")
         git(self.repo, "config", "user.email", "ci@example.invalid")
+        git(self.repo, "config", "tag.gpgSign", "false")
         (self.repo / "message.txt").write_text("original\n", encoding="utf-8")
         (self.repo / "LICENSE").write_text("MIT\n", encoding="utf-8")
         git(self.repo, "add", ".")
         git(self.repo, "commit", "-m", "source")
         self.commit = git(self.repo, "rev-parse", "HEAD", capture=True)
+        git(self.repo, "tag", "v1.0.0")
+        git(self.repo, "tag", "snapshot-tag")
 
     def manifest(
         self,
@@ -44,13 +53,14 @@ class SourcePipelineTests(unittest.TestCase):
         commit: str | None = None,
     ):
         data = {
-            "schemaVersion": 2,
+            "schemaVersion": 3,
             "name": "demo",
             "version": "1.0.0",
             "buildRevision": 1,
             "source": {
+                "kind": "release",
                 "repository": "https://github.com/example/demo",
-                "tag": "v1.0.0",
+                "ref": "v1.0.0",
                 "commit": commit or self.commit,
             },
             "license": {
@@ -92,6 +102,20 @@ class SourcePipelineTests(unittest.TestCase):
         path.write_text(json.dumps(data), encoding="utf-8")
         return load_manifest(path)
 
+    def checkout_manifest(self, kind: str, ref: str):
+        manifest = self.manifest()
+        source = replace(
+            manifest.source,
+            kind=kind,
+            repository=str(self.repo),
+            ref=ref,
+        )
+        return replace(
+            manifest,
+            version=manifest.version if kind == "release" else None,
+            source=source,
+        )
+
     def make_patch(self) -> tuple[str, str]:
         (self.repo / "message.txt").write_text("patched\n", encoding="utf-8")
         patch_text = git(self.repo, "diff", "--binary", capture=True) + "\n"
@@ -127,6 +151,22 @@ class SourcePipelineTests(unittest.TestCase):
 
         self.assertEqual(prepared.tree, expected_tree)
         self.assertEqual(prepared.patches, ())
+
+    def test_checks_out_release_branch_tag_and_direct_commit_refs(self) -> None:
+        cases = (
+            ("release", "v1.0.0"),
+            ("nightly", "main"),
+            ("nightly", "snapshot-tag"),
+            ("nightly", self.commit),
+        )
+        for index, (kind, ref) in enumerate(cases):
+            with self.subTest(kind=kind, ref=ref):
+                destination = self.root / f"checkout-{index}"
+                checkout_source(self.checkout_manifest(kind, ref), destination)
+                self.assertEqual(
+                    git(destination, "rev-parse", "HEAD", capture=True),
+                    self.commit,
+                )
 
     def test_rejects_wrong_source_commit(self) -> None:
         with self.assertRaisesRegex(SystemExit, "expected deadbeef"):

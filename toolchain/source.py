@@ -57,12 +57,12 @@ def checkout_source(manifest: ToolManifest, destination: Path) -> Path:
     destination.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", str(destination)], check=True)
     _git(destination, "remote", "add", "origin", manifest.source.repository)
-    _git(destination, "fetch", "--depth", "1", "origin", manifest.source.tag)
+    _git(destination, "fetch", "--depth", "1", "origin", manifest.source.ref)
     try:
         _git(destination, "checkout", "--detach", manifest.source.commit)
     except SystemExit as exc:
         raise SystemExit(
-            f"upstream tag {manifest.source.tag} did not fetch commit {manifest.source.commit}"
+            f"upstream ref {manifest.source.ref} did not fetch commit {manifest.source.commit}"
         ) from exc
     verify_source_commit(destination, manifest.source.commit)
     return destination

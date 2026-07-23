@@ -1,11 +1,12 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "name": "rlm-tools-bsl",
   "version": "1.26.0",
   "buildRevision": 3,
   "source": {
+    "kind": "release",
     "repository": "https://github.com/Dach-Coin/rlm-tools-bsl",
-    "tag": "v1.26.0",
+    "ref": "v1.26.0",
     "commit": "dcfff95ce678f49971b14d8acd82b042a6855470"
   },
   "license": {

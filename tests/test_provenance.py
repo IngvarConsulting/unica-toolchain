@@ -39,8 +39,10 @@ class ProvenanceTests(unittest.TestCase):
         )
 
         provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
-        self.assertEqual(provenance["schemaVersion"], 2)
+        self.assertEqual(provenance["schemaVersion"], 3)
         self.assertEqual(provenance["releaseTag"], "v8-runner-v0.5.1-build.1")
+        self.assertEqual(provenance["source"]["kind"], "release")
+        self.assertEqual(provenance["source"]["ref"], "v0.5.1")
         self.assertEqual(provenance["source"]["commit"], "a" * 40)
         self.assertEqual(provenance["source"]["tree"], "b" * 40)
         self.assertEqual(provenance["source"]["patches"][0]["sha256"], "c" * 64)

@@ -30,9 +30,9 @@ class RepositoryContractTests(unittest.TestCase):
             ),
             "bsl-analyzer": (
                 "release",
-                "v0.2.55",
-                "5a02bb44dedaf29e0e29af1f740279d279199854",
-                "bsl-analyzer-v0.2.55-build.1",
+                "v0.2.62",
+                "9a6cb15d60c0381dce6a3b5e536434adb12da89b",
+                "bsl-analyzer-v0.2.62-build.1",
             ),
             "v8-runner": (
                 "nightly",

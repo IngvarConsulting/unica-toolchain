@@ -168,6 +168,19 @@ class SourcePipelineTests(unittest.TestCase):
                     self.commit,
                 )
 
+    def test_checks_out_pinned_nightly_commit_after_branch_advances(self) -> None:
+        (self.repo / "message.txt").write_text("advanced\n", encoding="utf-8")
+        git(self.repo, "add", "message.txt")
+        git(self.repo, "commit", "-m", "advance main")
+
+        destination = self.root / "checkout-pinned-nightly"
+        checkout_source(self.checkout_manifest("nightly", "main"), destination)
+
+        self.assertEqual(
+            git(destination, "rev-parse", "HEAD", capture=True),
+            self.commit,
+        )
+
     def test_rejects_wrong_source_commit(self) -> None:
         with self.assertRaisesRegex(SystemExit, "expected deadbeef"):
             verify_source_commit(self.repo, "deadbeef")

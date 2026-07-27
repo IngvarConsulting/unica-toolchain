@@ -1,13 +1,13 @@
 {
   "schemaVersion": 3,
   "name": "rlm-tools-bsl",
-  "version": "1.26.0",
-  "buildRevision": 3,
+  "version": "1.29.1",
+  "buildRevision": 1,
   "source": {
     "kind": "release",
     "repository": "https://github.com/Dach-Coin/rlm-tools-bsl",
-    "ref": "v1.26.0",
-    "commit": "dcfff95ce678f49971b14d8acd82b042a6855470"
+    "ref": "v1.29.1",
+    "commit": "8bc6e9fc83b522f9a79eab3193eb13fc2cecb8ed"
   },
   "license": {
     "spdx": "MIT",

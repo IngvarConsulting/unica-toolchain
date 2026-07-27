@@ -26,7 +26,7 @@ class RepositoryContractTests(unittest.TestCase):
                 "release",
                 "v1.29.1",
                 "8bc6e9fc83b522f9a79eab3193eb13fc2cecb8ed",
-                "rlm-tools-bsl-v1.29.1-build.1",
+                "rlm-tools-bsl-v1.29.1-build.2",
             ),
             "bsl-analyzer": (
                 "release",

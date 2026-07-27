@@ -96,6 +96,7 @@ def write_entrypoint_stub(path: Path, module: str, attr: str) -> None:
         "\n".join(
             [
                 "import importlib",
+                "import multiprocessing",
                 "import sys",
                 "",
                 f"MODULE = {module!r}",
@@ -108,6 +109,7 @@ def write_entrypoint_stub(path: Path, module: str, attr: str) -> None:
                 "    return obj()",
                 "",
                 "if __name__ == '__main__':",
+                "    multiprocessing.freeze_support()",
                 "    sys.exit(main())",
                 "",
             ]

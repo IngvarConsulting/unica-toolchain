@@ -10,12 +10,27 @@ from toolchain.builders.python_pyinstaller import (
     build_python_pyinstaller,
     parse_uv_version,
     verify_builder_identity,
+    write_entrypoint_stub,
 )
 from toolchain.manifest import load_manifest
 from toolchain.source import PreparedSource
 
 
 class PythonBuilderTests(unittest.TestCase):
+    def test_frozen_entrypoint_dispatches_multiprocessing_before_cli_parsing(self) -> None:
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        stub = root / "entrypoint.py"
+
+        write_entrypoint_stub(stub, "rlm_tools_bsl.server", "main")
+
+        source = stub.read_text(encoding="utf-8")
+        self.assertIn("import multiprocessing", source)
+        self.assertIn("multiprocessing.freeze_support()", source)
+        self.assertLess(
+            source.index("multiprocessing.freeze_support()"),
+            source.index("sys.exit(main())"),
+        )
+
     def test_parses_uv_platform_metadata_and_checks_exact_identity(self) -> None:
         self.assertEqual(
             parse_uv_version("uv 0.11.29 (901092ee1 aarch64-apple-darwin)"),

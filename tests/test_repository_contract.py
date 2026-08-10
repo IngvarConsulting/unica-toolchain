@@ -37,8 +37,8 @@ class RepositoryContractTests(unittest.TestCase):
             "v8-runner": (
                 "nightly",
                 "master",
-                "72d346c0a8fcf8373d9388257d11e6bef0ad70b2",
-                "v8-runner-nightly-master-build.1",
+                "7ce1b062843d86644fe55741dbe0ee79f7ca767d",
+                "v8-runner-nightly-master-build.2",
             ),
         }
         for name, (kind, ref, commit, release) in expected.items():

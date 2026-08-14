@@ -212,6 +212,7 @@ def build_python_nuitka_standalone(
             "nuitka",
             "--mode=standalone",
             "--assume-yes-for-downloads",
+            f"--output-filename={builder.binaries[0].asset_base}{target.exe}",
             f"--include-package={builder.include_package}",
             f"--include-package-data={builder.include_package}",
             f"--output-dir={output_root}",

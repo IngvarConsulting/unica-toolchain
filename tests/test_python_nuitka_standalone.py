@@ -112,6 +112,7 @@ class PythonNuitkaStandaloneTests(unittest.TestCase):
         self.assertTrue(main_args[1].endswith("/rlm-bsl-mcp.py"))
         self.assertIn("--include-package=rlm_tools_bsl", compile_command)
         self.assertIn("--include-package-data=rlm_tools_bsl", compile_command)
+        self.assertIn("--output-filename=rlm-bsl-index", compile_command)
         self.assertIn("--assume-yes-for-downloads", compile_command)
         self.assertFalse(any("onefile" in item for item in compile_command))
         self.assertFalse(any("tempdir" in item for item in compile_command))
@@ -158,7 +159,10 @@ class PythonNuitkaStandaloneTests(unittest.TestCase):
         source_dir.mkdir()
         source = PreparedSource(source_dir, manifest.source.commit, "b" * 40, ())
 
+        commands: list[list[str]] = []
+
         def fake_runner(command: list[str], *, cwd=None, env=None) -> str:
+            commands.append(command)
             if command == ["uv", "--version"]:
                 return "uv 0.11.29"
             if command[-1:] == ["--version"] and "nuitka" in command:
@@ -193,6 +197,11 @@ class PythonNuitkaStandaloneTests(unittest.TestCase):
                 "rlm-tools-bsl": ("rlm_tools_bsl.server", "main"),
             }[name],
         )
+
+        compile_command = next(
+            command for command in commands if "--mode=standalone" in command
+        )
+        self.assertIn("--output-filename=rlm-bsl-index.exe", compile_command)
 
         archive = validate_runtime_archive(
             result.assets[0],

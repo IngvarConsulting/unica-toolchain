@@ -2,7 +2,7 @@
   "schemaVersion": 3,
   "name": "rlm-tools-bsl",
   "version": "1.33.0",
-  "buildRevision": 2,
+  "buildRevision": 3,
   "source": {
     "kind": "release",
     "repository": "https://github.com/Dach-Coin/rlm-tools-bsl",
@@ -20,20 +20,13 @@
   },
   "patches": [],
   "builder": {
-    "kind": "python-pyinstaller",
+    "kind": "python-nuitka-standalone",
     "pythonVersion": "3.12.10",
     "uvVersion": "0.11.29",
-    "pyinstallerVersion": "6.21.0",
+    "nuitkaVersion": "4.1.3",
     "lockFile": "uv.lock",
-    "collectAll": "rlm_tools_bsl",
+    "includePackage": "rlm_tools_bsl",
     "binaries": [
-      {
-        "package": "rlm_tools_bsl",
-        "sourceName": "rlm-tools-bsl",
-        "module": "rlm_tools_bsl.server",
-        "assetBase": "rlm-bsl-mcp",
-        "smokeArgs": ["--help"]
-      },
       {
         "package": "rlm_tools_bsl",
         "sourceName": "rlm-bsl-index",
@@ -57,6 +50,13 @@
             "expectedOutput": ["usage: rlm-bsl-index index info"]
           }
         ]
+      },
+      {
+        "package": "rlm_tools_bsl",
+        "sourceName": "rlm-tools-bsl",
+        "module": "rlm_tools_bsl.server",
+        "assetBase": "rlm-bsl-mcp",
+        "smokeArgs": ["--help"]
       }
     ]
   },

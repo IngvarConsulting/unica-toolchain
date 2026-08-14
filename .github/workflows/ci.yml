@@ -70,3 +70,9 @@ jobs:
           --target "${{ matrix.target }}"
           --work-dir ".build/ci-rlm-tools-bsl-${{ matrix.target }}"
           --out-dir "dist/ci-rlm-tools-bsl-${{ matrix.target }}"
+      - name: Emit target provenance and checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m json.tool "dist/ci-rlm-tools-bsl-${{ matrix.target }}/provenance-rlm-tools-bsl-${{ matrix.target }}.json"
+          cat "dist/ci-rlm-tools-bsl-${{ matrix.target }}/checksums-rlm-tools-bsl-${{ matrix.target }}.txt"

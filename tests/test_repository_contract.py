@@ -154,6 +154,15 @@ class RepositoryContractTests(unittest.TestCase):
             text,
         )
         self.assertIn('--target "${{ matrix.target }}"', text)
+        self.assertIn("Emit target provenance and checksum", text)
+        self.assertIn(
+            'python -m json.tool "dist/ci-rlm-tools-bsl-${{ matrix.target }}/provenance-rlm-tools-bsl-${{ matrix.target }}.json"',
+            text,
+        )
+        self.assertIn(
+            'cat "dist/ci-rlm-tools-bsl-${{ matrix.target }}/checksums-rlm-tools-bsl-${{ matrix.target }}.txt"',
+            text,
+        )
         self.assertNotIn("softprops/action-gh-release", text)
 
 

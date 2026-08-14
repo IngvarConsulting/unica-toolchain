@@ -151,6 +151,47 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(manifest.builder.python_version, "3.12.10")
         self.assertEqual(manifest.builder.binaries[0].module, "rlm_tools_bsl.server")
 
+    def test_loads_captured_smoke_checks_with_literal_output_contracts(self) -> None:
+        data = python_manifest()
+        binary = data["builder"]["binaries"][0]
+        binary["smokeChecks"] = [
+            {
+                "args": ["index", "build", "--help"],
+                "expectedOutput": [
+                    "Строить неполный индекс",
+                    "--allow-unsupported-format",
+                ],
+            }
+        ]
+
+        manifest = load_manifest(self.write_manifest(data))
+
+        self.assertEqual(
+            manifest.builder.binaries[0].smoke_checks[0].args,
+            ("index", "build", "--help"),
+        )
+        self.assertEqual(
+            manifest.builder.binaries[0].smoke_checks[0].expected_output,
+            ("Строить неполный индекс", "--allow-unsupported-format"),
+        )
+
+    def test_rejects_smoke_checks_that_do_not_prove_output(self) -> None:
+        for field, value in (("args", []), ("expectedOutput", []), ("expectedOutput", [""])):
+            with self.subTest(field=field, value=value):
+                data = python_manifest()
+                check = {
+                    "args": ["index", "build", "--help"],
+                    "expectedOutput": ["Строить неполный индекс"],
+                }
+                check[field] = value
+                data["builder"]["binaries"][0]["smokeChecks"] = [check]
+
+                with self.assertRaisesRegex(
+                    SystemExit,
+                    rf"smokeChecks\[0\]\.{field} must be a non-empty array of non-empty strings",
+                ):
+                    load_manifest(self.write_manifest(data))
+
     def test_generates_release_prerelease_and_nightly_tags(self) -> None:
         prerelease = cargo_manifest()
         prerelease["version"] = "0.5.2-pre.1"

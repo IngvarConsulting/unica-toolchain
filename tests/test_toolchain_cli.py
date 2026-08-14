@@ -11,7 +11,7 @@ from pathlib import Path
 from contextlib import redirect_stdout
 from unittest.mock import Mock, patch
 
-from tests.test_manifest import cargo_manifest
+from tests.test_manifest import cargo_manifest, python_manifest
 from toolchain.manifest import load_manifest
 from toolchain.source import PreparedSource
 
@@ -148,6 +148,133 @@ class ToolchainCliTests(unittest.TestCase):
 
         cargo.assert_called_once()
         metadata.assert_called_once()
+
+    def test_smoke_captures_full_rlm_index_help_lifecycle_and_cyrillic(self) -> None:
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        data = python_manifest()
+        binary = data["builder"]["binaries"][0]
+        binary.update(
+            {
+                "sourceName": "rlm-bsl-index",
+                "module": "rlm_tools_bsl.cli",
+                "assetBase": "rlm-bsl-index",
+                "smokeArgs": ["--help"],
+                "smokeChecks": [
+                    {
+                        "args": ["index", "build", "--help"],
+                        "expectedOutput": [
+                            "Строить неполный индекс",
+                            "--allow-unsupported-format",
+                        ],
+                    },
+                    {
+                        "args": ["index", "update", "--help"],
+                        "expectedOutput": ["usage: rlm-bsl-index index update"],
+                    },
+                    {
+                        "args": ["index", "info", "--help"],
+                        "expectedOutput": ["usage: rlm-bsl-index index info"],
+                    },
+                ],
+            }
+        )
+        manifest_path = root / "manifest.json"
+        manifest_path.write_text(json.dumps(data), encoding="utf-8")
+        manifest = load_manifest(manifest_path)
+        asset = root / "rlm-bsl-index-win-x64.exe"
+        calls = root / "calls.txt"
+        asset.write_text(
+            "#!/usr/bin/env python3\n"
+            "import pathlib, sys\n"
+            f"log = pathlib.Path({str(calls)!r})\n"
+            "with log.open('a', encoding='utf-8') as stream:\n"
+            "    stream.write(' '.join(sys.argv[1:]) + '\\n')\n"
+            "args = sys.argv[1:]\n"
+            "if args == ['--help']:\n"
+            "    print('usage: rlm-bsl-index {index}')\n"
+            "elif args == ['index', 'build', '--help']:\n"
+            "    print('Строить неполный индекс --allow-unsupported-format')\n"
+            "elif args == ['index', 'update', '--help']:\n"
+            "    print('usage: rlm-bsl-index index update')\n"
+            "elif args == ['index', 'info', '--help']:\n"
+            "    print('usage: rlm-bsl-index index info')\n"
+            "else:\n"
+            "    raise SystemExit(9)\n",
+            encoding="utf-8",
+        )
+        asset.chmod(0o755)
+        module = load_script()
+        captured = io.StringIO()
+
+        with redirect_stdout(captured):
+            module._smoke(manifest, "win-x64", [asset])
+
+        self.assertEqual(
+            calls.read_text(encoding="utf-8").splitlines(),
+            [
+                "--help",
+                "index build --help",
+                "index update --help",
+                "index info --help",
+            ],
+        )
+        self.assertIn("Строить неполный индекс", captured.getvalue())
+        self.assertIn("smoke passed: rlm-bsl-index-win-x64.exe index build --help", captured.getvalue())
+
+        console_bytes = io.BytesIO()
+        cp1252_console = io.TextIOWrapper(
+            console_bytes,
+            encoding="cp1252",
+            errors="strict",
+            write_through=True,
+        )
+        with redirect_stdout(cp1252_console):
+            module._smoke(manifest, "win-x64", [asset])
+        self.assertIn("Строить неполный индекс".encode("utf-8"), console_bytes.getvalue())
+
+        asset.write_text(
+            "#!/usr/bin/env python3\n"
+            "import sys\n"
+            "print('ASCII help without the declared output')\n",
+            encoding="utf-8",
+        )
+        with self.assertRaisesRegex(
+            SystemExit,
+            "smoke output mismatch.*Строить неполный индекс",
+        ):
+            with redirect_stdout(io.StringIO()):
+                module._smoke(manifest, "win-x64", [asset])
+
+    def test_python_builder_identity_records_only_applied_windows_stdio_policy(self) -> None:
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        manifest_path = root / "manifest.json"
+        manifest_path.write_text(json.dumps(python_manifest()), encoding="utf-8")
+        manifest = load_manifest(manifest_path)
+        module = load_script()
+
+        self.assertEqual(
+            module.builder_identity(manifest, "win-x64"),
+            {
+                "kind": "python-pyinstaller",
+                "python": "3.12.10",
+                "uv": "0.11.29",
+                "pyinstaller": "6.21.0",
+                "stdio": {
+                    "encoding": "utf-8",
+                    "stdoutErrors": "surrogateescape",
+                    "stderrErrors": "backslashreplace",
+                },
+            },
+        )
+        self.assertEqual(
+            module.builder_identity(manifest, "darwin-arm64"),
+            {
+                "kind": "python-pyinstaller",
+                "python": "3.12.10",
+                "uv": "0.11.29",
+                "pyinstaller": "6.21.0",
+            },
+        )
 
     def test_main_resolves_relative_work_and_output_paths_before_build(self) -> None:
         root = Path(self.enterContext(tempfile.TemporaryDirectory()))

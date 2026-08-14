@@ -14,7 +14,10 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from toolchain.builders.cargo import build_cargo  # noqa: E402
-from toolchain.builders.python_pyinstaller import build_python_pyinstaller  # noqa: E402
+from toolchain.builders.python_pyinstaller import (  # noqa: E402
+    WINDOWS_STDIO_POLICY,
+    build_python_pyinstaller,
+)
 from toolchain.manifest import (  # noqa: E402
     CargoBuilderSpec,
     PythonBuilderSpec,
@@ -41,6 +44,13 @@ def builder_versions(manifest: ToolManifest) -> dict[str, str]:
             "pyinstaller": manifest.builder.pyinstaller_version,
         }
     raise SystemExit(f"unsupported builder: {manifest.builder}")
+
+
+def builder_identity(manifest: ToolManifest, target_key: str) -> dict:
+    identity: dict = {"kind": manifest.builder.kind, **builder_versions(manifest)}
+    if isinstance(manifest.builder, PythonBuilderSpec) and target_key == "win-x64":
+        identity["stdio"] = dict(WINDOWS_STDIO_POLICY)
+    return identity
 
 
 def describe(manifest: ToolManifest) -> dict:
@@ -71,6 +81,16 @@ def _prepare(manifest: ToolManifest, repo_root: Path, work_dir: Path):
     return prepare_source(manifest, repo_root, source_dir)
 
 
+def _write_utf8_stdout(value: str) -> None:
+    end = "" if value.endswith("\n") else "\n"
+    buffer = getattr(sys.stdout, "buffer", None)
+    if buffer is None:
+        print(value, end=end)
+        return
+    buffer.write((value + end).encode("utf-8"))
+    buffer.flush()
+
+
 def validate_source(
     manifest: ToolManifest,
     repo_root: Path,
@@ -97,7 +117,42 @@ def _smoke(manifest: ToolManifest, target_key: str, assets: list[Path]) -> None:
     target = manifest.targets[target_key]
     for binary in manifest.builder.binaries:
         name = f"{binary.asset_base}-{target_key}{target.exe}"
-        subprocess.run([str(by_name[name]), *binary.smoke_args], check=True)
+        if not binary.smoke_checks:
+            subprocess.run([str(by_name[name]), *binary.smoke_args], check=True)
+            continue
+        checks = [(binary.smoke_args, ())]
+        checks.extend(
+            (check.args, check.expected_output) for check in binary.smoke_checks
+        )
+        for args, expected_output in checks:
+            command = [str(by_name[name]), *args]
+            result = subprocess.run(
+                command,
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            try:
+                stdout = result.stdout.decode("utf-8")
+                stderr = result.stderr.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise SystemExit(
+                    f"smoke output is not UTF-8 for {name} {' '.join(args)}: {exc}"
+                ) from exc
+            if stdout:
+                _write_utf8_stdout(stdout)
+            if stderr:
+                _write_utf8_stdout(stderr)
+            label = f"{name} {' '.join(args)}".rstrip()
+            if result.returncode != 0:
+                raise SystemExit(f"smoke failed: {label} exited {result.returncode}")
+            output = stdout + stderr
+            missing = [expected for expected in expected_output if expected not in output]
+            if missing:
+                raise SystemExit(
+                    f"smoke output mismatch for {label}: missing {missing!r}"
+                )
+            print(f"smoke passed: {label}")
 
 
 def build(
@@ -124,7 +179,7 @@ def build(
         prepared,
         assets,
         out_dir,
-        builder_identity={"kind": manifest.builder.kind, **builder_versions(manifest)},
+        builder_identity=builder_identity(manifest, target_key),
     )
 
 

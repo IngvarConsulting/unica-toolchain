@@ -14,8 +14,8 @@ contract can be extended to other Cargo or Python/PyInstaller tools.
 - Releases are built only by an explicit `workflow_dispatch` for one manifest.
 - Every manifest declares an official release or nightly source identity and
   pins the upstream repository, ref, exact commit, licenses,
-  builder versions, target matrix, assets, smoke commands, and toolchain build
-  revision.
+  builder versions, target matrix, assets, smoke commands, optional required
+  output assertions, and toolchain build revision.
 - Optional repository-owned patches are applied in manifest order and verified
   by SHA-256 before any build starts.
 - Python dependencies come from an upstream frozen `uv.lock`; Cargo builds use
@@ -46,7 +46,8 @@ independently, so changing one manifest does not rebuild the others.
 3. Increment `buildRevision` when rebuilding the same release version or
    nightly source label.
 4. Open a pull request and wait for source, patch, license, schema, and workflow
-   validation.
+   validation. RLM changes also build and smoke the frozen Windows CLIs before
+   merge, including their captured nested help output.
 5. Merge the pull request, then manually run `Build tool release` on `main` with
    the manifest name (without `.json`).
 6. Verify the assets, checksums, provenance, and native smoke command before

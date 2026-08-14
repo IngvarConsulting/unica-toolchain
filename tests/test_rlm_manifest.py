@@ -20,14 +20,15 @@ class RlmManifestTests(unittest.TestCase):
         self.assertIsInstance(manifest.builder, PythonBuilderSpec)
         self.assertEqual(manifest.name, "rlm-tools-bsl")
         self.assertEqual(manifest.version, "1.33.0")
-        self.assertEqual(manifest.build_revision, 1)
+        self.assertEqual(manifest.build_revision, 2)
         self.assertEqual(manifest.source.kind, "release")
         self.assertEqual(manifest.source.ref, "v1.33.0")
         self.assertEqual(
             manifest.source.commit,
             "3e6920cd015a61af4ba7aa1a5f1fedd8bc935549",
         )
-        self.assertEqual(release_tag(manifest), "rlm-tools-bsl-v1.33.0-build.1")
+        self.assertEqual(release_tag(manifest), "rlm-tools-bsl-v1.33.0-build.2")
+        self.assertEqual(manifest.patches, ())
 
         self.assertEqual(
             [
@@ -37,6 +38,25 @@ class RlmManifestTests(unittest.TestCase):
             [
                 ("rlm-tools-bsl", "rlm-bsl-mcp", "rlm_tools_bsl", "rlm_tools_bsl.server"),
                 ("rlm-bsl-index", "rlm-bsl-index", "rlm_tools_bsl", "rlm_tools_bsl.cli"),
+            ],
+        )
+        index = manifest.builder.binaries[1]
+        self.assertEqual(index.smoke_args, ("--help",))
+        self.assertEqual(
+            [(check.args, check.expected_output) for check in index.smoke_checks],
+            [
+                (
+                    ("index", "build", "--help"),
+                    ("Строить неполный индекс", "--allow-unsupported-format"),
+                ),
+                (
+                    ("index", "update", "--help"),
+                    ("usage: rlm-bsl-index index update",),
+                ),
+                (
+                    ("index", "info", "--help"),
+                    ("usage: rlm-bsl-index index info",),
+                ),
             ],
         )
         self.assertEqual(

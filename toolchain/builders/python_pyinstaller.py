@@ -16,6 +16,11 @@ Runner = Callable[..., str]
 EntrypointResolver = Callable[[Path, str], tuple[str, str]]
 UV_VERSION = re.compile(r"^uv ([0-9]+\.[0-9]+\.[0-9]+)(?:\s|$)")
 PYTHON_VERSION = re.compile(r"^Python ([0-9]+\.[0-9]+\.[0-9]+)(?:\s|$)")
+WINDOWS_STDIO_POLICY = {
+    "encoding": "utf-8",
+    "stdoutErrors": "surrogateescape",
+    "stderrErrors": "backslashreplace",
+}
 
 
 def run_command(command: list[str], *, cwd=None, env=None) -> str:
@@ -26,6 +31,8 @@ def run_command(command: list[str], *, cwd=None, env=None) -> str:
         env=env,
         check=True,
         text=True,
+        encoding="utf-8",
+        errors="backslashreplace",
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
@@ -84,6 +91,8 @@ print(json.dumps({"module": entrypoint.module, "attr": entrypoint.attr}))
         [str(python), "-c", code, name],
         check=True,
         text=True,
+        encoding="utf-8",
+        errors="backslashreplace",
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
@@ -91,29 +100,55 @@ print(json.dumps({"module": entrypoint.module, "attr": entrypoint.attr}))
     return data["module"], data["attr"]
 
 
-def write_entrypoint_stub(path: Path, module: str, attr: str) -> None:
-    path.write_text(
-        "\n".join(
+def write_entrypoint_stub(
+    path: Path,
+    module: str,
+    attr: str,
+    *,
+    configure_utf8_stdio: bool = False,
+) -> None:
+    lines = [
+        "import importlib",
+        "import multiprocessing",
+        "import sys",
+    ]
+    if configure_utf8_stdio:
+        lines.extend(
             [
-                "import importlib",
-                "import multiprocessing",
-                "import sys",
                 "",
-                f"MODULE = {module!r}",
-                f"CALLABLE = {attr!r}",
+                "def configure_utf8_stdio():",
+                "    if sys.stdout is not None and hasattr(sys.stdout, 'reconfigure'):",
+                "        sys.stdout.reconfigure("
+                f"encoding={WINDOWS_STDIO_POLICY['encoding']!r}, "
+                f"errors={WINDOWS_STDIO_POLICY['stdoutErrors']!r})",
+                "    if sys.stderr is not None and hasattr(sys.stderr, 'reconfigure'):",
+                "        sys.stderr.reconfigure("
+                f"encoding={WINDOWS_STDIO_POLICY['encoding']!r}, "
+                f"errors={WINDOWS_STDIO_POLICY['stderrErrors']!r})",
                 "",
-                "def main():",
-                "    obj = importlib.import_module(MODULE)",
-                "    for part in CALLABLE.split('.'):",
-                "        obj = getattr(obj, part)",
-                "    return obj()",
-                "",
-                "if __name__ == '__main__':",
-                "    multiprocessing.freeze_support()",
-                "    sys.exit(main())",
-                "",
+                "configure_utf8_stdio()",
             ]
-        ),
+        )
+    lines.extend(
+        [
+            "",
+            f"MODULE = {module!r}",
+            f"CALLABLE = {attr!r}",
+            "",
+            "def main():",
+            "    obj = importlib.import_module(MODULE)",
+            "    for part in CALLABLE.split('.'):",
+            "        obj = getattr(obj, part)",
+            "    return obj()",
+            "",
+            "if __name__ == '__main__':",
+            "    multiprocessing.freeze_support()",
+            "    sys.exit(main())",
+            "",
+        ]
+    )
+    path.write_text(
+        "\n".join(lines),
         encoding="utf-8",
         newline="\n",
     )
@@ -192,7 +227,12 @@ def build_python_pyinstaller(
         build_root = work_dir / "pyinstaller" / binary.source_name
         build_root.mkdir(parents=True, exist_ok=True)
         stub = build_root / "entrypoint.py"
-        write_entrypoint_stub(stub, module, attr)
+        write_entrypoint_stub(
+            stub,
+            module,
+            attr,
+            configure_utf8_stdio=target_key == "win-x64",
+        )
         asset_name = f"{binary.asset_base}-{target_key}{target.exe}"
         runner(
             [

@@ -2,7 +2,7 @@ from pathlib import Path
 import unittest
 
 from toolchain.manifest import (
-    PythonBuilderSpec,
+    PythonNuitkaStandaloneSpec,
     expected_asset_names,
     expected_release_files,
     load_manifest,
@@ -17,17 +17,17 @@ class RlmManifestTests(unittest.TestCase):
     def test_v1_33_release_keeps_upstream_entrypoints_and_renames_assets(self) -> None:
         manifest = load_manifest(REPO_ROOT / "manifests" / "rlm-tools-bsl.json")
 
-        self.assertIsInstance(manifest.builder, PythonBuilderSpec)
+        self.assertIsInstance(manifest.builder, PythonNuitkaStandaloneSpec)
         self.assertEqual(manifest.name, "rlm-tools-bsl")
         self.assertEqual(manifest.version, "1.33.0")
-        self.assertEqual(manifest.build_revision, 2)
+        self.assertEqual(manifest.build_revision, 3)
         self.assertEqual(manifest.source.kind, "release")
         self.assertEqual(manifest.source.ref, "v1.33.0")
         self.assertEqual(
             manifest.source.commit,
             "3e6920cd015a61af4ba7aa1a5f1fedd8bc935549",
         )
-        self.assertEqual(release_tag(manifest), "rlm-tools-bsl-v1.33.0-build.2")
+        self.assertEqual(release_tag(manifest), "rlm-tools-bsl-v1.33.0-build.3")
         self.assertEqual(manifest.patches, ())
 
         self.assertEqual(
@@ -36,11 +36,15 @@ class RlmManifestTests(unittest.TestCase):
                 for binary in manifest.builder.binaries
             ],
             [
-                ("rlm-tools-bsl", "rlm-bsl-mcp", "rlm_tools_bsl", "rlm_tools_bsl.server"),
                 ("rlm-bsl-index", "rlm-bsl-index", "rlm_tools_bsl", "rlm_tools_bsl.cli"),
+                ("rlm-tools-bsl", "rlm-bsl-mcp", "rlm_tools_bsl", "rlm_tools_bsl.server"),
             ],
         )
-        index = manifest.builder.binaries[1]
+        self.assertEqual(manifest.builder.python_version, "3.12.10")
+        self.assertEqual(manifest.builder.uv_version, "0.11.29")
+        self.assertEqual(manifest.builder.nuitka_version, "4.1.3")
+        self.assertEqual(manifest.builder.include_package, "rlm_tools_bsl")
+        index = manifest.builder.binaries[0]
         self.assertEqual(index.smoke_args, ("--help",))
         self.assertEqual(
             [(check.args, check.expected_output) for check in index.smoke_checks],
@@ -62,12 +66,9 @@ class RlmManifestTests(unittest.TestCase):
         self.assertEqual(
             expected_asset_names(manifest),
             {
-                "rlm-bsl-mcp-darwin-arm64",
-                "rlm-bsl-mcp-linux-x64",
-                "rlm-bsl-mcp-win-x64.exe",
-                "rlm-bsl-index-darwin-arm64",
-                "rlm-bsl-index-linux-x64",
-                "rlm-bsl-index-win-x64.exe",
+                "rlm-tools-bsl-darwin-arm64.tar.gz",
+                "rlm-tools-bsl-linux-x64.tar.gz",
+                "rlm-tools-bsl-win-x64.tar.gz",
             },
         )
         self.assertEqual(

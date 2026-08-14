@@ -5,7 +5,7 @@ from pathlib import Path
 
 from toolchain.manifest import (
     CargoBuilderSpec,
-    PythonBuilderSpec,
+    PythonNuitkaStandaloneSpec,
     expected_asset_names,
     load_manifest,
     release_tag,
@@ -26,7 +26,7 @@ class RepositoryContractTests(unittest.TestCase):
                 "release",
                 "v1.33.0",
                 "3e6920cd015a61af4ba7aa1a5f1fedd8bc935549",
-                "rlm-tools-bsl-v1.33.0-build.2",
+                "rlm-tools-bsl-v1.33.0-build.3",
             ),
             "bsl-analyzer": (
                 "release",
@@ -84,18 +84,19 @@ class RepositoryContractTests(unittest.TestCase):
             },
         )
 
-    def test_rlm_pins_python_builder_and_both_entrypoints(self) -> None:
+    def test_rlm_pins_nuitka_builder_and_one_archive_per_target(self) -> None:
         manifest = self.load("rlm-tools-bsl")
 
-        self.assertIsInstance(manifest.builder, PythonBuilderSpec)
+        self.assertIsInstance(manifest.builder, PythonNuitkaStandaloneSpec)
         self.assertEqual(manifest.builder.python_version, "3.12.10")
         self.assertEqual(manifest.builder.uv_version, "0.11.29")
-        self.assertEqual(manifest.builder.pyinstaller_version, "6.21.0")
+        self.assertEqual(manifest.builder.nuitka_version, "4.1.3")
+        self.assertEqual(manifest.builder.include_package, "rlm_tools_bsl")
         self.assertEqual(
             [binary.module for binary in manifest.builder.binaries],
-            ["rlm_tools_bsl.server", "rlm_tools_bsl.cli"],
+            ["rlm_tools_bsl.cli", "rlm_tools_bsl.server"],
         )
-        self.assertEqual(len(expected_asset_names(manifest)), 6)
+        self.assertEqual(len(expected_asset_names(manifest)), 3)
 
     def test_rlm_only_implementation_is_removed(self) -> None:
         self.assertFalse((REPO_ROOT / "scripts" / "build_rlm.py").exists())
@@ -122,6 +123,8 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("refs/tags/", text)
         self.assertIn("expected_release_files", text)
         self.assertIn("actions/attest-build-provenance@v2", text)
+        self.assertIn("dist/*.tar.gz", text)
+        self.assertIn("python-nuitka-standalone", text)
         self.assertIn("softprops/action-gh-release@v3", text)
         self.assertIn("make_latest: false", text)
 
@@ -135,10 +138,14 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertNotIn("softprops/action-gh-release", text)
         self.assertNotIn("gh release", text)
 
-    def test_pull_request_ci_builds_and_smokes_frozen_rlm_on_windows(self) -> None:
+    def test_pull_request_ci_builds_and_smokes_frozen_rlm_archives_on_three_targets(self) -> None:
         text = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-        self.assertIn("rlm-windows-frozen-smoke:", text)
-        self.assertIn("runs-on: windows-latest", text)
+        self.assertIn("rlm-standalone-smoke:", text)
+        self.assertIn("runs-on: ${{ matrix.runner }}", text)
+        self.assertIn("fail-fast: false", text)
+        self.assertIn("macos-14", text)
+        self.assertIn("ubuntu-latest", text)
+        self.assertIn("windows-latest", text)
         self.assertIn('python-version: "3.12.10"', text)
         self.assertIn("uses: astral-sh/setup-uv@v7", text)
         self.assertIn('version: "0.11.29"', text)
@@ -146,7 +153,17 @@ class RepositoryContractTests(unittest.TestCase):
             "python scripts/toolchain.py build --manifest manifests/rlm-tools-bsl.json",
             text,
         )
-        self.assertIn("--target win-x64", text)
+        self.assertIn('--target "${{ matrix.target }}"', text)
+        self.assertIn("Emit target provenance and checksum", text)
+        self.assertIn(
+            'python -m json.tool "dist/ci-rlm-tools-bsl-${{ matrix.target }}/provenance-rlm-tools-bsl-${{ matrix.target }}.json"',
+            text,
+        )
+        self.assertIn(
+            'cat "dist/ci-rlm-tools-bsl-${{ matrix.target }}/checksums-rlm-tools-bsl-${{ matrix.target }}.txt"',
+            text,
+        )
+        self.assertNotIn("softprops/action-gh-release", text)
 
 
 if __name__ == "__main__":

@@ -93,7 +93,7 @@ jobs:
   build:
     needs: metadata
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.metadata.outputs.matrix) }}
@@ -103,7 +103,7 @@ jobs:
         with:
           python-version: ${{ needs.metadata.outputs.python_version }}
       - uses: astral-sh/setup-uv@v7
-        if: needs.metadata.outputs.builder_kind == 'python-pyinstaller'
+        if: needs.metadata.outputs.builder_kind == 'python-pyinstaller' || needs.metadata.outputs.builder_kind == 'python-nuitka-standalone'
         with:
           version: ${{ needs.metadata.outputs.uv_version }}
           enable-cache: false
@@ -192,12 +192,18 @@ jobs:
             exit 1
           fi
       - name: Attest native executables
+        if: needs.metadata.outputs.builder_kind != 'python-nuitka-standalone'
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
             dist/*-darwin-arm64
             dist/*-linux-x64
             dist/*-win-x64.exe
+      - name: Attest standalone runtime archives
+        if: needs.metadata.outputs.builder_kind == 'python-nuitka-standalone'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*.tar.gz
       - uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.metadata.outputs.release_tag }}

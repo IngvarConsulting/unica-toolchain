@@ -18,15 +18,23 @@ from toolchain.builders.python_pyinstaller import (  # noqa: E402
     WINDOWS_STDIO_POLICY,
     build_python_pyinstaller,
 )
+from toolchain.builders.python_nuitka_standalone import (  # noqa: E402
+    build_python_nuitka_standalone,
+)
 from toolchain.manifest import (  # noqa: E402
     CargoBuilderSpec,
     PythonBuilderSpec,
+    PythonNuitkaStandaloneSpec,
     ToolManifest,
     expected_release_files,
     load_manifest,
     release_tag,
 )
 from toolchain.provenance import write_target_metadata  # noqa: E402
+from toolchain.runtime_archive import (  # noqa: E402
+    materialize_runtime_archive,
+    validate_runtime_archive,
+)
 from toolchain.source import (  # noqa: E402
     checkout_source,
     copy_license_assets,
@@ -43,10 +51,33 @@ def builder_versions(manifest: ToolManifest) -> dict[str, str]:
             "uv": manifest.builder.uv_version,
             "pyinstaller": manifest.builder.pyinstaller_version,
         }
+    if isinstance(manifest.builder, PythonNuitkaStandaloneSpec):
+        return {
+            "python": manifest.builder.python_version,
+            "uv": manifest.builder.uv_version,
+            "nuitka": manifest.builder.nuitka_version,
+        }
     raise SystemExit(f"unsupported builder: {manifest.builder}")
 
 
-def builder_identity(manifest: ToolManifest, target_key: str) -> dict:
+def builder_identity(
+    manifest: ToolManifest,
+    target_key: str,
+    observed: dict | None = None,
+) -> dict:
+    if isinstance(manifest.builder, PythonNuitkaStandaloneSpec):
+        if observed is None:
+            raise SystemExit("Nuitka builder identity must come from the build report")
+        expected = {"kind": manifest.builder.kind, **builder_versions(manifest)}
+        for key, value in expected.items():
+            if observed.get(key) != value:
+                raise SystemExit(
+                    f"observed Nuitka builder {key} is {observed.get(key)}, expected {value}"
+                )
+        compiler = observed.get("compiler")
+        if not isinstance(compiler, dict) or not compiler:
+            raise SystemExit("observed Nuitka builder is missing compiler identity")
+        return observed
     identity: dict = {"kind": manifest.builder.kind, **builder_versions(manifest)}
     if isinstance(manifest.builder, PythonBuilderSpec) and target_key == "win-x64":
         identity["stdio"] = dict(WINDOWS_STDIO_POLICY)
@@ -112,20 +143,65 @@ def validate_source(
     )
 
 
-def _smoke(manifest: ToolManifest, target_key: str, assets: list[Path]) -> None:
-    by_name = {path.name: path for path in assets}
+def _smoke(
+    manifest: ToolManifest,
+    target_key: str,
+    assets: list[Path],
+    *,
+    smoke_root: Path | None = None,
+    expected_builder_identity: dict | None = None,
+) -> None:
     target = manifest.targets[target_key]
+    if isinstance(manifest.builder, PythonNuitkaStandaloneSpec):
+        if len(assets) != 1:
+            raise SystemExit(
+                f"Nuitka build must produce one archive, got {[path.name for path in assets]}"
+            )
+        if smoke_root is None:
+            raise SystemExit("Nuitka archive smoke requires an isolated destination")
+        expected_entrypoints = {
+            binary.asset_base: f"{binary.asset_base}{target.exe}"
+            for binary in manifest.builder.binaries
+        }
+        validated = validate_runtime_archive(
+            assets[0],
+            expected_release_tag=release_tag(manifest),
+            expected_source_ref=manifest.source.ref,
+            expected_source_commit=manifest.source.commit,
+            expected_target_key=target_key,
+            expected_target_triple=target.target_triple,
+            expected_entrypoints=expected_entrypoints,
+        )
+        if validated.manifest.builder != expected_builder_identity:
+            raise SystemExit(
+                "archive builder identity mismatch: "
+                f"{validated.manifest.builder} != {expected_builder_identity}"
+            )
+        materialized = materialize_runtime_archive(validated, smoke_root)
+        by_base = {
+            name: materialized[relative]
+            for name, relative in validated.manifest.entrypoints.items()
+        }
+    else:
+        by_name = {path.name: path for path in assets}
+        by_base = {
+            binary.asset_base: by_name[
+                f"{binary.asset_base}-{target_key}{target.exe}"
+            ]
+            for binary in manifest.builder.binaries
+        }
     for binary in manifest.builder.binaries:
-        name = f"{binary.asset_base}-{target_key}{target.exe}"
+        executable = by_base[binary.asset_base]
+        name = executable.name
         if not binary.smoke_checks:
-            subprocess.run([str(by_name[name]), *binary.smoke_args], check=True)
+            subprocess.run([str(executable), *binary.smoke_args], check=True)
             continue
         checks = [(binary.smoke_args, ())]
         checks.extend(
             (check.args, check.expected_output) for check in binary.smoke_checks
         )
         for args, expected_output in checks:
-            command = [str(by_name[name]), *args]
+            command = [str(executable), *args]
             result = subprocess.run(
                 command,
                 check=False,
@@ -168,18 +244,36 @@ def build(
     prepared = _prepare(manifest, repo_root, work_dir)
     if isinstance(manifest.builder, CargoBuilderSpec):
         assets = build_cargo(manifest, target_key, prepared, out_dir, work_dir)
+        observed_identity = None
     elif isinstance(manifest.builder, PythonBuilderSpec):
         assets = build_python_pyinstaller(manifest, target_key, prepared, out_dir, work_dir)
+        observed_identity = None
+    elif isinstance(manifest.builder, PythonNuitkaStandaloneSpec):
+        result = build_python_nuitka_standalone(
+            manifest, target_key, prepared, out_dir, work_dir
+        )
+        assets = list(result.assets)
+        observed_identity = result.builder_identity
     else:
         raise SystemExit(f"unsupported builder: {manifest.builder}")
-    _smoke(manifest, target_key, assets)
+    _smoke(
+        manifest,
+        target_key,
+        assets,
+        smoke_root=(work_dir / "smoke-runtime")
+        if isinstance(manifest.builder, PythonNuitkaStandaloneSpec)
+        else None,
+        expected_builder_identity=observed_identity,
+    )
     write_target_metadata(
         manifest,
         target_key,
         prepared,
         assets,
         out_dir,
-        builder_identity=builder_identity(manifest, target_key),
+        builder_identity=builder_identity(
+            manifest, target_key, observed=observed_identity
+        ),
     )
 
 

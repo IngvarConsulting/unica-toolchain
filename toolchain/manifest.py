@@ -453,16 +453,26 @@ def release_tag(manifest: ToolManifest) -> str:
     )
 
 
-def expected_asset_names(manifest: ToolManifest) -> set[str]:
+def expected_target_asset_names(
+    manifest: ToolManifest,
+    target_key: str,
+) -> set[str]:
+    if target_key not in manifest.targets:
+        raise SystemExit(f"unknown target {target_key}")
     if isinstance(manifest.builder, PythonNuitkaStandaloneSpec):
-        return {
-            f"{manifest.name}-{target_key}.tar.gz"
-            for target_key in manifest.targets
-        }
+        return {f"{manifest.name}-{target_key}.tar.gz"}
+    target = manifest.targets[target_key]
     return {
         f"{binary.asset_base}-{target_key}{target.exe}"
-        for target_key, target in manifest.targets.items()
         for binary in manifest.builder.binaries
+    }
+
+
+def expected_asset_names(manifest: ToolManifest) -> set[str]:
+    return {
+        asset
+        for target_key in manifest.targets
+        for asset in expected_target_asset_names(manifest, target_key)
     }
 
 

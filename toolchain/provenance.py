@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from toolchain.manifest import ToolManifest, release_tag
+from toolchain.manifest import ToolManifest, expected_target_asset_names, release_tag
 from toolchain.source import PreparedSource, sha256
 
 
@@ -20,9 +20,7 @@ def write_target_metadata(
     if target_key not in manifest.targets:
         raise SystemExit(f"unknown target {target_key}")
     target = manifest.targets[target_key]
-    expected = {
-        f"{binary.asset_base}-{target_key}{target.exe}" for binary in manifest.builder.binaries
-    }
+    expected = expected_target_asset_names(manifest, target_key)
     actual = {asset.name for asset in assets}
     if actual != expected:
         raise SystemExit(

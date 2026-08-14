@@ -11,8 +11,10 @@ from pathlib import Path
 from contextlib import redirect_stdout
 from unittest.mock import Mock, patch
 
-from tests.test_manifest import cargo_manifest, python_manifest
-from toolchain.manifest import load_manifest
+from tests.test_manifest import cargo_manifest, python_manifest, python_nuitka_manifest
+from toolchain.builders.python_nuitka_standalone import NuitkaBuildResult
+from toolchain.manifest import load_manifest, release_tag
+from toolchain.runtime_archive import write_runtime_archive
 from toolchain.source import PreparedSource
 
 
@@ -275,6 +277,233 @@ class ToolchainCliTests(unittest.TestCase):
                 "pyinstaller": "6.21.0",
             },
         )
+
+    def test_nuitka_build_smokes_extracted_archive_before_writing_metadata(self) -> None:
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        data = python_nuitka_manifest()
+        data["builder"]["binaries"] = [
+            {
+                "package": "rlm_tools_bsl",
+                "sourceName": "rlm-bsl-index",
+                "module": "rlm_tools_bsl.cli",
+                "assetBase": "rlm-bsl-index",
+                "smokeArgs": ["--help"],
+                "smokeChecks": [
+                    {
+                        "args": ["index", "build", "--help"],
+                        "expectedOutput": ["Строить неполный индекс"],
+                    },
+                    {
+                        "args": ["index", "update", "--help"],
+                        "expectedOutput": ["usage: rlm-bsl-index index update"],
+                    },
+                    {
+                        "args": ["index", "info", "--help"],
+                        "expectedOutput": ["usage: rlm-bsl-index index info"],
+                    },
+                ],
+            },
+            {
+                "package": "rlm_tools_bsl",
+                "sourceName": "rlm-tools-bsl",
+                "module": "rlm_tools_bsl.server",
+                "assetBase": "rlm-bsl-mcp",
+                "smokeArgs": ["--help"],
+            },
+        ]
+        manifest_path = root / "manifest.json"
+        manifest_path.write_text(json.dumps(data), encoding="utf-8")
+        manifest = load_manifest(manifest_path)
+        source = PreparedSource(root / "source", manifest.source.commit, "b" * 40, ())
+        source.path.mkdir()
+        payload = root / "payload"
+        payload.mkdir()
+        calls = root / "calls.txt"
+        executable = (
+            "#!/usr/bin/env python3\n"
+            "from pathlib import Path\n"
+            "import sys\n"
+            f"log = Path({str(calls)!r})\n"
+            "with log.open('a', encoding='utf-8') as stream:\n"
+            "    stream.write(Path(sys.argv[0]).name + ' ' + ' '.join(sys.argv[1:]) + '\\n')\n"
+            "name = Path(sys.argv[0]).name\n"
+            "args = sys.argv[1:]\n"
+            "if name == 'rlm-bsl-mcp':\n"
+            "    print('usage: rlm-bsl-mcp')\n"
+            "elif args == ['--help']:\n"
+            "    print('usage: rlm-bsl-index')\n"
+            "elif args == ['index', 'build', '--help']:\n"
+            "    print('Строить неполный индекс')\n"
+            "elif args == ['index', 'update', '--help']:\n"
+            "    print('usage: rlm-bsl-index index update')\n"
+            "elif args == ['index', 'info', '--help']:\n"
+            "    print('usage: rlm-bsl-index index info')\n"
+            "else:\n"
+            "    raise SystemExit(9)\n"
+        ).encode()
+        for name in ("rlm-bsl-index", "rlm-bsl-mcp"):
+            path = payload / name
+            path.write_bytes(executable)
+            path.chmod(0o755)
+        archive = root / "out" / "rlm-tools-bsl-darwin-arm64.tar.gz"
+        builder_identity = {
+            "kind": "python-nuitka-standalone",
+            "python": "3.12.10",
+            "uv": "0.11.29",
+            "nuitka": "4.1.3",
+            "compiler": {
+                "cCompiler": "Clang",
+                "ccName": "clang",
+                "compiler": "clang",
+            },
+        }
+        write_runtime_archive(
+            archive_path=archive,
+            payload_root=payload,
+            release_tag=release_tag(manifest),
+            source={
+                "ref": manifest.source.ref,
+                "commit": source.commit,
+                "tree": source.tree,
+                "patches": [],
+            },
+            target={
+                "key": "darwin-arm64",
+                "triple": manifest.targets["darwin-arm64"].target_triple,
+            },
+            entrypoints={
+                "rlm-bsl-index": "rlm-bsl-index",
+                "rlm-bsl-mcp": "rlm-bsl-mcp",
+            },
+            builder=builder_identity,
+        )
+        module = load_script()
+        metadata = Mock()
+
+        with (
+            patch.object(module, "_prepare", return_value=source),
+            patch.object(
+                module,
+                "build_python_nuitka_standalone",
+                return_value=NuitkaBuildResult((archive,), builder_identity),
+                create=True,
+            ),
+            patch.object(module, "write_target_metadata", metadata),
+        ):
+            module.build(
+                manifest,
+                root,
+                "darwin-arm64",
+                root / "work",
+                root / "out",
+            )
+
+        self.assertEqual(
+            calls.read_text(encoding="utf-8").splitlines(),
+            [
+                "rlm-bsl-index --help",
+                "rlm-bsl-index index build --help",
+                "rlm-bsl-index index update --help",
+                "rlm-bsl-index index info --help",
+                "rlm-bsl-mcp --help",
+            ],
+        )
+        metadata.assert_called_once()
+        self.assertEqual(metadata.call_args.args[3], [archive])
+        self.assertEqual(
+            metadata.call_args.kwargs["builder_identity"], builder_identity
+        )
+
+    def test_nuitka_build_rejects_corrupt_archive_before_metadata(self) -> None:
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        data = python_nuitka_manifest()
+        data["builder"]["binaries"] = [
+            dict(data["builder"]["binaries"][0], sourceName="rlm-bsl-index", module="rlm_tools_bsl.cli", assetBase="rlm-bsl-index"),
+            dict(data["builder"]["binaries"][0], sourceName="rlm-tools-bsl", module="rlm_tools_bsl.server", assetBase="rlm-bsl-mcp"),
+        ]
+        manifest_path = root / "manifest.json"
+        manifest_path.write_text(json.dumps(data), encoding="utf-8")
+        manifest = load_manifest(manifest_path)
+        source = PreparedSource(root / "source", manifest.source.commit, "b" * 40, ())
+        archive = root / "out" / "rlm-tools-bsl-darwin-arm64.tar.gz"
+        archive.parent.mkdir()
+        archive.write_bytes(b"not a tar archive")
+        identity = {
+            "kind": "python-nuitka-standalone",
+            "python": "3.12.10",
+            "uv": "0.11.29",
+            "nuitka": "4.1.3",
+            "compiler": {"cCompiler": "Clang", "ccName": "clang", "compiler": "clang"},
+        }
+        module = load_script()
+        metadata = Mock()
+
+        with (
+            patch.object(module, "_prepare", return_value=source),
+            patch.object(
+                module,
+                "build_python_nuitka_standalone",
+                return_value=NuitkaBuildResult((archive,), identity),
+                create=True,
+            ),
+            patch.object(module, "write_target_metadata", metadata),
+        ):
+            with self.assertRaisesRegex(SystemExit, "cannot read runtime archive"):
+                module.build(manifest, root, "darwin-arm64", root / "work", root / "out")
+
+        metadata.assert_not_called()
+
+    def test_nuitka_build_rejects_archive_builder_identity_drift_before_metadata(self) -> None:
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        data = python_nuitka_manifest()
+        data["builder"]["binaries"] = [
+            dict(data["builder"]["binaries"][0], sourceName="rlm-bsl-index", module="rlm_tools_bsl.cli", assetBase="rlm-bsl-index"),
+            dict(data["builder"]["binaries"][0], sourceName="rlm-tools-bsl", module="rlm_tools_bsl.server", assetBase="rlm-bsl-mcp"),
+        ]
+        manifest_path = root / "manifest.json"
+        manifest_path.write_text(json.dumps(data), encoding="utf-8")
+        manifest = load_manifest(manifest_path)
+        source = PreparedSource(root / "source", manifest.source.commit, "b" * 40, ())
+        payload = root / "payload"
+        payload.mkdir()
+        for name in ("rlm-bsl-index", "rlm-bsl-mcp"):
+            executable = payload / name
+            executable.write_bytes(b"#!/bin/sh\nexit 0\n")
+            executable.chmod(0o755)
+        archive = root / "out" / "rlm-tools-bsl-darwin-arm64.tar.gz"
+        write_runtime_archive(
+            archive_path=archive,
+            payload_root=payload,
+            release_tag=release_tag(manifest),
+            source={"ref": manifest.source.ref, "commit": source.commit, "tree": source.tree, "patches": []},
+            target={"key": "darwin-arm64", "triple": manifest.targets["darwin-arm64"].target_triple},
+            entrypoints={"rlm-bsl-index": "rlm-bsl-index", "rlm-bsl-mcp": "rlm-bsl-mcp"},
+            builder={"kind": "tampered-builder"},
+        )
+        observed = {
+            "kind": "python-nuitka-standalone",
+            "python": "3.12.10",
+            "uv": "0.11.29",
+            "nuitka": "4.1.3",
+            "compiler": {"cCompiler": "Clang", "ccName": "clang", "compiler": "clang"},
+        }
+        module = load_script()
+        metadata = Mock()
+
+        with (
+            patch.object(module, "_prepare", return_value=source),
+            patch.object(
+                module,
+                "build_python_nuitka_standalone",
+                return_value=NuitkaBuildResult((archive,), observed),
+                create=True,
+            ),
+            patch.object(module, "write_target_metadata", metadata),
+        ):
+            with self.assertRaisesRegex(SystemExit, "archive builder identity mismatch"):
+                module.build(manifest, root, "darwin-arm64", root / "work", root / "out")
+
+        metadata.assert_not_called()
 
     def test_main_resolves_relative_work_and_output_paths_before_build(self) -> None:
         root = Path(self.enterContext(tempfile.TemporaryDirectory()))

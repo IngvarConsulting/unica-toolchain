@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.test_manifest import cargo_manifest
+from tests.test_manifest import cargo_manifest, python_nuitka_manifest
 from toolchain.manifest import load_manifest
 from toolchain.provenance import write_target_metadata
 from toolchain.source import AppliedPatch, PreparedSource
@@ -55,6 +55,55 @@ class ProvenanceTests(unittest.TestCase):
         self.assertNotIn(b"\r\n", provenance_path.read_bytes())
         self.assertNotIn(b"\r\n", checksums_path.read_bytes())
         self.assertIn(asset.name.encode(), checksums_path.read_bytes())
+
+    def test_nuitka_provenance_hashes_only_the_target_archive(self) -> None:
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        manifest_data = python_nuitka_manifest()
+        manifest_path = root / "manifest.json"
+        manifest_path.write_text(json.dumps(manifest_data), encoding="utf-8")
+        manifest = load_manifest(manifest_path)
+        source = PreparedSource(root / "source", "a" * 40, "b" * 40, ())
+        out_dir = root / "out"
+        out_dir.mkdir()
+        archive = out_dir / "rlm-tools-bsl-linux-x64.tar.gz"
+        archive.write_bytes(b"verified archive")
+        identity = {
+            "kind": "python-nuitka-standalone",
+            "python": "3.12.10",
+            "uv": "0.11.29",
+            "nuitka": "4.1.3",
+            "compiler": {
+                "cCompiler": "GCC",
+                "ccName": "gcc",
+                "compiler": "gcc",
+            },
+        }
+
+        provenance_path, checksums_path = write_target_metadata(
+            manifest,
+            "linux-x64",
+            source,
+            [archive],
+            out_dir,
+            builder_identity=identity,
+        )
+
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+        self.assertEqual(provenance["builder"], identity)
+        self.assertEqual(
+            provenance["assets"],
+            [
+                {
+                    "name": archive.name,
+                    "sha256": hashlib.sha256(b"verified archive").hexdigest(),
+                    "size": len(b"verified archive"),
+                }
+            ],
+        )
+        self.assertEqual(
+            checksums_path.read_text(encoding="utf-8"),
+            f"{hashlib.sha256(b'verified archive').hexdigest()}  {archive.name}\n",
+        )
 
 
 if __name__ == "__main__":

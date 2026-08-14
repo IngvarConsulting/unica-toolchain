@@ -91,7 +91,18 @@ class PythonBuilderSpec:
     binaries: tuple[BinarySpec, ...]
 
 
-BuilderSpec = CargoBuilderSpec | PythonBuilderSpec
+@dataclass(frozen=True)
+class PythonNuitkaStandaloneSpec:
+    kind: Literal["python-nuitka-standalone"]
+    python_version: str
+    uv_version: str
+    nuitka_version: str
+    lock_file: str
+    include_package: str
+    binaries: tuple[BinarySpec, ...]
+
+
+BuilderSpec = CargoBuilderSpec | PythonBuilderSpec | PythonNuitkaStandaloneSpec
 
 
 @dataclass(frozen=True)
@@ -266,13 +277,22 @@ def _load_binary(value: Any, index: int, *, python: bool) -> BinarySpec:
     )
 
 
-def _load_binaries(value: Any, *, python: bool) -> tuple[BinarySpec, ...]:
+def _load_binaries(
+    value: Any,
+    *,
+    python: bool,
+    unique_sources: bool = False,
+) -> tuple[BinarySpec, ...]:
     if not isinstance(value, list) or not value:
         raise SystemExit("builder.binaries must be a non-empty array")
     binaries = tuple(_load_binary(item, index, python=python) for index, item in enumerate(value))
     bases = [binary.asset_base for binary in binaries]
     if len(set(bases)) != len(bases):
         raise SystemExit("builder.binaries assetBase values must be unique")
+    if unique_sources:
+        sources = [binary.source_name for binary in binaries]
+        if len(set(sources)) != len(sources):
+            raise SystemExit("builder.binaries sourceName values must be unique")
     return binaries
 
 
@@ -311,6 +331,31 @@ def _load_builder(value: Any) -> BuilderSpec:
             lock_file=_string(data["lockFile"], "builder.lockFile"),
             collect_all=_name(data["collectAll"], "builder.collectAll"),
             binaries=_load_binaries(data["binaries"], python=True),
+        )
+    if kind == "python-nuitka-standalone":
+        _fields(
+            data,
+            "builder",
+            required={
+                "kind",
+                "pythonVersion",
+                "uvVersion",
+                "nuitkaVersion",
+                "lockFile",
+                "includePackage",
+                "binaries",
+            },
+        )
+        return PythonNuitkaStandaloneSpec(
+            kind="python-nuitka-standalone",
+            python_version=_version(data["pythonVersion"], "builder.pythonVersion"),
+            uv_version=_version(data["uvVersion"], "builder.uvVersion"),
+            nuitka_version=_version(data["nuitkaVersion"], "builder.nuitkaVersion"),
+            lock_file=_string(data["lockFile"], "builder.lockFile"),
+            include_package=_name(data["includePackage"], "builder.includePackage"),
+            binaries=_load_binaries(
+                data["binaries"], python=True, unique_sources=True
+            ),
         )
     raise SystemExit(f"unsupported builder kind: {kind}")
 
@@ -409,6 +454,11 @@ def release_tag(manifest: ToolManifest) -> str:
 
 
 def expected_asset_names(manifest: ToolManifest) -> set[str]:
+    if isinstance(manifest.builder, PythonNuitkaStandaloneSpec):
+        return {
+            f"{manifest.name}-{target_key}.tar.gz"
+            for target_key in manifest.targets
+        }
     return {
         f"{binary.asset_base}-{target_key}{target.exe}"
         for target_key, target in manifest.targets.items()

@@ -9,6 +9,7 @@ from pathlib import Path
 from toolchain.manifest import (
     CargoBuilderSpec,
     PythonBuilderSpec,
+    PythonNuitkaStandaloneSpec,
     expected_asset_names,
     expected_release_files,
     load_manifest,
@@ -110,6 +111,20 @@ def python_manifest() -> dict:
     return data
 
 
+def python_nuitka_manifest() -> dict:
+    data = python_manifest()
+    data["builder"] = {
+        "kind": "python-nuitka-standalone",
+        "pythonVersion": "3.12.10",
+        "uvVersion": "0.11.29",
+        "nuitkaVersion": "4.1.3",
+        "lockFile": "uv.lock",
+        "includePackage": "rlm_tools_bsl",
+        "binaries": data["builder"]["binaries"],
+    }
+    return data
+
+
 class ManifestTests(unittest.TestCase):
     def write_manifest(self, data: dict) -> Path:
         root = Path(self.enterContext(tempfile.TemporaryDirectory()))
@@ -150,6 +165,55 @@ class ManifestTests(unittest.TestCase):
         self.assertIsInstance(manifest.builder, PythonBuilderSpec)
         self.assertEqual(manifest.builder.python_version, "3.12.10")
         self.assertEqual(manifest.builder.binaries[0].module, "rlm_tools_bsl.server")
+
+    def test_loads_nuitka_standalone_builder_and_generates_one_archive_per_target(self) -> None:
+        manifest = load_manifest(self.write_manifest(python_nuitka_manifest()))
+
+        self.assertIsInstance(manifest.builder, PythonNuitkaStandaloneSpec)
+        self.assertEqual(manifest.builder.python_version, "3.12.10")
+        self.assertEqual(manifest.builder.uv_version, "0.11.29")
+        self.assertEqual(manifest.builder.nuitka_version, "4.1.3")
+        self.assertEqual(manifest.builder.include_package, "rlm_tools_bsl")
+        self.assertEqual(
+            expected_asset_names(manifest),
+            {
+                "rlm-tools-bsl-darwin-arm64.tar.gz",
+                "rlm-tools-bsl-linux-x64.tar.gz",
+                "rlm-tools-bsl-win-x64.tar.gz",
+            },
+        )
+
+    def test_nuitka_builder_rejects_pyinstaller_fields_and_invalid_identity(self) -> None:
+        cases: list[tuple[dict, str]] = []
+
+        missing_version = python_nuitka_manifest()
+        del missing_version["builder"]["nuitkaVersion"]
+        cases.append((missing_version, "missing fields: nuitkaVersion"))
+
+        empty_package = python_nuitka_manifest()
+        empty_package["builder"]["includePackage"] = ""
+        cases.append((empty_package, "includePackage must be a non-empty string"))
+
+        pyinstaller_field = python_nuitka_manifest()
+        pyinstaller_field["builder"]["collectAll"] = "rlm_tools_bsl"
+        cases.append((pyinstaller_field, "unknown fields: collectAll"))
+
+        duplicate_source = python_nuitka_manifest()
+        duplicate_source["builder"]["binaries"].append(
+            dict(duplicate_source["builder"]["binaries"][0], assetBase="other")
+        )
+        cases.append((duplicate_source, "sourceName values must be unique"))
+
+        duplicate_asset = python_nuitka_manifest()
+        duplicate_asset["builder"]["binaries"].append(
+            dict(duplicate_asset["builder"]["binaries"][0], sourceName="other")
+        )
+        cases.append((duplicate_asset, "assetBase values must be unique"))
+
+        for data, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(SystemExit, message):
+                    load_manifest(self.write_manifest(data))
 
     def test_loads_captured_smoke_checks_with_literal_output_contracts(self) -> None:
         data = python_manifest()

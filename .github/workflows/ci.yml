@@ -38,3 +38,25 @@ jobs:
           done
       - name: Validate GitHub Actions syntax
         run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7
+
+  rlm-windows-frozen-smoke:
+    needs: test
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12.10"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "0.11.29"
+          enable-cache: false
+      - name: Build and smoke the frozen Windows RLM CLIs
+        shell: bash
+        run: >-
+          python scripts/toolchain.py build --manifest manifests/rlm-tools-bsl.json
+          --repo-root .
+          --target win-x64
+          --work-dir .build/ci-rlm-tools-bsl-win-x64
+          --out-dir dist/ci-rlm-tools-bsl-win-x64

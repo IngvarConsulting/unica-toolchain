@@ -2,7 +2,7 @@
   "schemaVersion": 3,
   "name": "rlm-tools-bsl",
   "version": "1.33.0",
-  "buildRevision": 1,
+  "buildRevision": 2,
   "source": {
     "kind": "release",
     "repository": "https://github.com/Dach-Coin/rlm-tools-bsl",
@@ -39,7 +39,24 @@
         "sourceName": "rlm-bsl-index",
         "module": "rlm_tools_bsl.cli",
         "assetBase": "rlm-bsl-index",
-        "smokeArgs": ["--help"]
+        "smokeArgs": ["--help"],
+        "smokeChecks": [
+          {
+            "args": ["index", "build", "--help"],
+            "expectedOutput": [
+              "Строить неполный индекс",
+              "--allow-unsupported-format"
+            ]
+          },
+          {
+            "args": ["index", "update", "--help"],
+            "expectedOutput": ["usage: rlm-bsl-index index update"]
+          },
+          {
+            "args": ["index", "info", "--help"],
+            "expectedOutput": ["usage: rlm-bsl-index index info"]
+          }
+        ]
       }
     ]
   },

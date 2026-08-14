@@ -37,6 +37,8 @@ def _git(source_dir: Path, *args: str) -> str:
             ["git", "-C", str(source_dir), *args],
             check=True,
             text=True,
+            encoding="utf-8",
+            errors="backslashreplace",
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )

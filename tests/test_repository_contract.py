@@ -26,7 +26,7 @@ class RepositoryContractTests(unittest.TestCase):
                 "release",
                 "v1.33.0",
                 "3e6920cd015a61af4ba7aa1a5f1fedd8bc935549",
-                "rlm-tools-bsl-v1.33.0-build.1",
+                "rlm-tools-bsl-v1.33.0-build.2",
             ),
             "bsl-analyzer": (
                 "release",
@@ -125,14 +125,28 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("softprops/action-gh-release@v3", text)
         self.assertIn("make_latest: false", text)
 
-    def test_pull_request_ci_validates_sources_without_building_tools(self) -> None:
+    def test_pull_request_ci_validates_sources_without_release_operations(self) -> None:
         text = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         self.assertIn("python -m unittest discover -s tests", text)
         self.assertIn("python -m py_compile scripts/*.py toolchain/*.py toolchain/builders/*.py tests/*.py", text)
         self.assertIn("scripts/toolchain.py validate-source", text)
         self.assertIn("manifests/*.json", text)
         self.assertIn("rhysd/actionlint:1.7.7", text)
-        self.assertNotIn("scripts/toolchain.py build", text)
+        self.assertNotIn("softprops/action-gh-release", text)
+        self.assertNotIn("gh release", text)
+
+    def test_pull_request_ci_builds_and_smokes_frozen_rlm_on_windows(self) -> None:
+        text = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn("rlm-windows-frozen-smoke:", text)
+        self.assertIn("runs-on: windows-latest", text)
+        self.assertIn('python-version: "3.12.10"', text)
+        self.assertIn("uses: astral-sh/setup-uv@v7", text)
+        self.assertIn('version: "0.11.29"', text)
+        self.assertIn(
+            "python scripts/toolchain.py build --manifest manifests/rlm-tools-bsl.json",
+            text,
+        )
+        self.assertIn("--target win-x64", text)
 
 
 if __name__ == "__main__":

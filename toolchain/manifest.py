@@ -48,11 +48,18 @@ class LicenseSpec:
 
 
 @dataclass(frozen=True)
+class SmokeCheckSpec:
+    args: tuple[str, ...]
+    expected_output: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class BinarySpec:
     package: str
     source_name: str
     asset_base: str
     smoke_args: tuple[str, ...]
+    smoke_checks: tuple[SmokeCheckSpec, ...]
     module: str | None = None
 
 
@@ -148,6 +155,16 @@ def _strings(value: Any, path: str) -> tuple[str, ...]:
     return tuple(value)
 
 
+def _non_empty_strings(value: Any, path: str) -> tuple[str, ...]:
+    if (
+        not isinstance(value, list)
+        or not value
+        or not all(isinstance(item, str) and item for item in value)
+    ):
+        raise SystemExit(f"{path} must be a non-empty array of non-empty strings")
+    return tuple(value)
+
+
 def _load_source(value: Any) -> SourceSpec:
     data = _object(value, "source")
     _fields(data, "source", required={"kind", "repository", "ref", "commit"})
@@ -221,13 +238,30 @@ def _load_binary(value: Any, index: int, *, python: bool) -> BinarySpec:
     required = {"package", "sourceName", "assetBase", "smokeArgs"}
     if python:
         required.add("module")
-    _fields(data, path, required=required)
+    _fields(data, path, required=required, optional={"smokeChecks"})
     asset_base = _name(data["assetBase"], f"{path}.assetBase")
+    smoke_checks: list[SmokeCheckSpec] = []
+    smoke_checks_value = data.get("smokeChecks", [])
+    if not isinstance(smoke_checks_value, list):
+        raise SystemExit(f"{path}.smokeChecks must be an array")
+    for smoke_index, item in enumerate(smoke_checks_value):
+        smoke_path = f"{path}.smokeChecks[{smoke_index}]"
+        smoke = _object(item, smoke_path)
+        _fields(smoke, smoke_path, required={"args", "expectedOutput"})
+        smoke_checks.append(
+            SmokeCheckSpec(
+                args=_non_empty_strings(smoke["args"], f"{smoke_path}.args"),
+                expected_output=_non_empty_strings(
+                    smoke["expectedOutput"], f"{smoke_path}.expectedOutput"
+                ),
+            )
+        )
     return BinarySpec(
         package=_name(data["package"], f"{path}.package"),
         source_name=_name(data["sourceName"], f"{path}.sourceName"),
         asset_base=asset_base,
         smoke_args=_strings(data["smokeArgs"], f"{path}.smokeArgs"),
+        smoke_checks=tuple(smoke_checks),
         module=_string(data["module"], f"{path}.module") if python else None,
     )
 

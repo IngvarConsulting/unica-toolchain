@@ -7,9 +7,11 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 from toolchain.manifest import load_manifest
 from toolchain.source import (
+    _git,
     checkout_source,
     copy_license_assets,
     prepare_source,
@@ -151,6 +153,14 @@ class SourcePipelineTests(unittest.TestCase):
 
         self.assertEqual(prepared.tree, expected_tree)
         self.assertEqual(prepared.patches, ())
+
+    def test_git_capture_decodes_utf8_independently_of_windows_locale(self) -> None:
+        git(self.repo, "commit", "--allow-empty", "-m", "Привет")
+
+        with patch("locale.getencoding", return_value="cp1252"):
+            subject = _git(self.repo, "log", "-1", "--format=%s")
+
+        self.assertEqual(subject, "Привет")
 
     def test_checks_out_release_branch_tag_and_direct_commit_refs(self) -> None:
         cases = (

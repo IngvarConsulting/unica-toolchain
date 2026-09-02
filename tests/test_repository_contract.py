@@ -21,6 +21,9 @@ class RepositoryContractTests(unittest.TestCase):
     def load(self, name: str):
         return load_manifest(MANIFESTS / f"{name}.json")
 
+    def test_v8_runner_is_historical_not_an_active_manifest(self) -> None:
+        self.assertFalse((MANIFESTS / "v8-runner.json").exists())
+
     def test_checked_in_tools_have_independent_release_identities(self) -> None:
         expected = {
             "rlm-tools-bsl": (
@@ -35,12 +38,6 @@ class RepositoryContractTests(unittest.TestCase):
                 "9a92766691bbd0191a5ff02c34fa9058e4570b85",
                 "bsl-analyzer-v0.2.67-build.1",
             ),
-            "v8-runner": (
-                "nightly",
-                "master",
-                "7ce1b062843d86644fe55741dbe0ee79f7ca767d",
-                "v8-runner-nightly-master-build.2",
-            ),
         }
         for name, (kind, ref, commit, release) in expected.items():
             with self.subTest(name=name):
@@ -53,14 +50,11 @@ class RepositoryContractTests(unittest.TestCase):
                 license_names = [item.asset_name for item in manifest.license.files]
                 self.assertEqual(len(license_names), len(set(license_names)))
 
-    def test_cargo_tools_pin_rust_and_normalize_assets(self) -> None:
+    def test_active_cargo_tools_pin_rust_and_normalize_assets(self) -> None:
         analyzer = self.load("bsl-analyzer")
-        runner = self.load("v8-runner")
 
         self.assertIsInstance(analyzer.builder, CargoBuilderSpec)
-        self.assertIsInstance(runner.builder, CargoBuilderSpec)
         self.assertEqual(analyzer.builder.rust_version, "1.95.0")
-        self.assertEqual(runner.builder.rust_version, "1.95.0")
         self.assertEqual(analyzer.builder.binaries[0].source_name, "bsl-analyzer-app")
         self.assertEqual(analyzer.builder.binaries[0].asset_base, "bsl-analyzer")
         self.assertEqual(
@@ -68,20 +62,6 @@ class RepositoryContractTests(unittest.TestCase):
             {
                 "CXXFLAGS": "/DMAP_FAILED=((void*)-1)",
                 "RUSTFLAGS": "-C target-feature=+crt-static",
-            },
-        )
-        self.assertEqual(runner.targets["linux-x64"].system_setup, "musl-tools")
-        self.assertEqual(runner.license.spdx, "AGPL-3.0-only")
-        self.assertEqual(
-            [item.asset_name for item in runner.license.files],
-            ["license-v8-runner-AGPL-3.0-only.txt"],
-        )
-        self.assertEqual(
-            expected_asset_names(runner),
-            {
-                "v8-runner-darwin-arm64",
-                "v8-runner-linux-x64",
-                "v8-runner-win-x64.exe",
             },
         )
 

@@ -6,8 +6,14 @@ Reproducible native builds of third-party tools distributed with
 This repository owns the part of the supply chain that starts from a pinned
 upstream source revision and ends with immutable, checksummed native release
 assets. It is intentionally not tied to one upstream project: the current
-manifests cover `rlm-tools-bsl`, `bsl-analyzer`, and `v8-runner`, and the same
+manifests cover `rlm-tools-bsl` and `bsl-analyzer`, and the same
 contract can be extended to other Cargo or Python/PyInstaller tools.
+
+Previously published `v8-runner` releases remain immutable historical
+artifacts in this repository. New `v8-runner` binaries are built and published
+by the Ingvar Consulting maintained
+[`v8-runner-rust`](https://github.com/IngvarConsulting/v8-runner-rust) fork, so
+there is no active runner manifest here.
 
 ## Release contract
 

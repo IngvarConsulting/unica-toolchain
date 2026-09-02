@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import unittest
 from pathlib import Path
 
@@ -122,10 +123,10 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("gh release view", text)
         self.assertIn("refs/tags/", text)
         self.assertIn("expected_release_files", text)
-        self.assertIn("actions/attest-build-provenance@v2", text)
+        self.assertIn("actions/attest-build-provenance@", text)
         self.assertIn("dist/*.tar.gz", text)
         self.assertIn("python-nuitka-standalone", text)
-        self.assertIn("softprops/action-gh-release@v3", text)
+        self.assertIn("softprops/action-gh-release@", text)
         self.assertIn("make_latest: false", text)
 
     def test_pull_request_ci_validates_sources_without_release_operations(self) -> None:
@@ -138,6 +139,16 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertNotIn("softprops/action-gh-release", text)
         self.assertNotIn("gh release", text)
 
+    def test_workflows_pin_every_github_action_to_a_commit(self) -> None:
+        workflow_root = REPO_ROOT / ".github" / "workflows"
+        unpinned: list[str] = []
+        for workflow in sorted(workflow_root.glob("*.yml")):
+            text = workflow.read_text(encoding="utf-8")
+            for action, ref in re.findall(r"uses:\s+([^@\s]+)@([^\s#]+)", text):
+                if re.fullmatch(r"[0-9a-f]{40}", ref) is None:
+                    unpinned.append(f"{workflow.name}: {action}@{ref}")
+        self.assertEqual(unpinned, [])
+
     def test_pull_request_ci_builds_and_smokes_frozen_rlm_archives_on_three_targets(self) -> None:
         text = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
         self.assertIn("rlm-standalone-smoke:", text)
@@ -147,7 +158,7 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("ubuntu-latest", text)
         self.assertIn("windows-latest", text)
         self.assertIn('python-version: "3.12.10"', text)
-        self.assertIn("uses: astral-sh/setup-uv@v7", text)
+        self.assertIn("uses: astral-sh/setup-uv@", text)
         self.assertIn('version: "0.11.29"', text)
         self.assertIn(
             "python scripts/toolchain.py build --manifest manifests/rlm-tools-bsl.json",

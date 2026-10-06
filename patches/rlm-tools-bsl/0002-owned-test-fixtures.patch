@@ -164,3 +164,94 @@ index 0b635da..9d69f87 100644
          assert "POSIX ERE" in out[0]["hint"], out[0]["hint"]
          assert "regex=False" in out[0]["hint"], out[0]["hint"]
  
+diff --git a/tests/test_unica_lifecycle_contract.py b/tests/test_unica_lifecycle_contract.py
+index 418b190..c7671a7 100644
+--- a/tests/test_unica_lifecycle_contract.py
++++ b/tests/test_unica_lifecycle_contract.py
+@@ -17,6 +17,40 @@ from rlm_tools_bsl.sandbox_backend import InlineSandboxBackend
+ from rlm_tools_bsl.session import SessionManager
+
+
++def _owned_cf_project(tmp_path):
++    # The real detector scans parent and grandparent. Both belong to this fixture.
++    return make_cf_project(tmp_path / "group" / "neighborhood" / "cf")
++
++
++def test_owned_startup_fixture_keeps_real_detector_neighborhood_private(monkeypatch, tmp_path):
++    from pathlib import Path
++    from rlm_tools_bsl import extension_detector
++
++    owner = tmp_path / "owner"
++    foreign = tmp_path / "foreign"
++    foreign.mkdir()
++    (foreign / "Configuration.xml").write_text(
++        "<MetaDataObject><Configuration><Properties><Name>Foreign</Name>"
++        "</Properties></Configuration></MetaDataObject>", encoding="utf-8"
++    )
++    real_detect_all = extension_detector._detect_all
++    scans = []
++
++    def observe_detect_all(directory):
++        result = real_detect_all(directory)
++        scans.append((Path(directory).resolve(), tuple(Path(info.path).resolve() for info in result)))
++        return result
++
++    monkeypatch.setattr(extension_detector, "_detect_all", observe_detect_all)
++    extension_detector.detect_extension_context(make_cf_project(owner / "cf"))
++    assert any(path == foreign.resolve() and foreign.resolve() in results for path, results in scans), scans
++    scans.clear()
++    extension_detector.detect_extension_context(_owned_cf_project(owner))
++    assert scans, "the real detector did not inspect its owned neighborhood"
++    assert all(path.is_relative_to(owner.resolve()) for path, _ in scans), scans
++    assert all(foreign.resolve() not in results for _, results in scans), scans
++
++
+ def test_inline_close_after_grace_retains_actual_running_execution(tmp_path):
+     sandbox = Sandbox(base_path=str(tmp_path), execution_timeout_seconds=45)
+     backend = InlineSandboxBackend(sandbox, None, install_llm_tools=False)
+@@ -50,7 +84,7 @@ def _real_inline_session(monkeypatch, tmp_path):
+     manager.on_evict = server._release_session_resources
+     monkeypatch.setattr(server, "session_manager", manager)
+     monkeypatch.setenv("RLM_SANDBOX_MODE", "inline")
+-    response = json.loads(server._rlm_start(path=make_cf_project(tmp_path / "cf"), query="owner retention"))
++    response = json.loads(server._rlm_start(path=_owned_cf_project(tmp_path), query="owner retention"))
+     assert "error" not in response, response
+     sid = response["session_id"]
+     session = manager.get(sid)
+@@ -232,6 +266,7 @@ def test_startup_session_is_retained_before_backend_registration(monkeypatch, tm
+     factory_entered, release_factory = threading.Event(), threading.Event()
+     original_factory = server._create_session_backend
+     response = []
++    project_path = _owned_cf_project(tmp_path)
+
+     def held_factory(*args, **kwargs):
+         factory_entered.set()
+@@ -241,13 +276,17 @@ def test_startup_session_is_retained_before_backend_registration(monkeypatch, tm
+     monkeypatch.setattr(server, "_create_session_backend", held_factory)
+     worker = threading.Thread(
+         target=lambda: response.append(
+-            json.loads(server._rlm_start(path=make_cf_project(tmp_path / "cf"), query="startup owner"))
++            json.loads(server._rlm_start(path=project_path, query="startup owner"))
+         )
+     )
+     worker.start()
+     sid = None
+     try:
+-        assert factory_entered.wait(5), "real start did not reach backend constructor"
++        assert factory_entered.wait(5), (
++            "real start did not reach backend constructor",
++            tuple(response),
++            worker.is_alive(),
++        )
+         with manager._lock:
+             assert len(manager._sessions) == 1
+             sid, session = next(iter(manager._sessions.items()))
+@@ -409,7 +448,7 @@ def test_failed_start_releases_retained_lease_without_keeping_idle_session(monke
+
+     monkeypatch.setattr(manager, "create_retained", observed_create)
+     monkeypatch.setattr(server, "_create_session_backend", refused_factory)
+-    reply = json.loads(server._rlm_start(path=make_cf_project(tmp_path / "cf"), query="failed startup"))
++    reply = json.loads(server._rlm_start(path=_owned_cf_project(tmp_path), query="failed startup"))
+     assert "controlled backend initialization refusal" in reply["error"]
+     assert len(created) == 1
+     sid, session = created[0]

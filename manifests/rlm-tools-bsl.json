@@ -25,7 +25,7 @@
     },
     {
       "path": "patches/rlm-tools-bsl/0002-owned-test-fixtures.patch",
-      "sha256": "bcdca602b74f525df954a5a48297489da853da5a15591f0d835f22651bf0ab45"
+      "sha256": "4a64bb2aeaca8cc53df37ec3a32880577f05ceb0ea67f341c02daefda1d6dbb5"
     }
   ],
   "builder": {

@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import re
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -20,6 +23,51 @@ MANIFESTS = REPO_ROOT / "manifests"
 class RepositoryContractTests(unittest.TestCase):
     def load(self, name: str):
         return load_manifest(MANIFESTS / f"{name}.json")
+
+    def test_windows_checkout_preserves_pinned_patch_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            checkout = root / "checkout"
+            source.mkdir()
+
+            def run(*args: str) -> None:
+                subprocess.run(
+                    ["git", *args], cwd=source, check=True,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                )
+
+            run("init", "-b", "main")
+            run("config", "core.autocrlf", "false")
+            attributes = REPO_ROOT / ".gitattributes"
+            if attributes.exists():
+                (source / ".gitattributes").write_bytes(attributes.read_bytes())
+            (source / "ordinary.txt").write_bytes(b"first\nsecond\n")
+            patches = [
+                patch
+                for manifest_path in sorted(MANIFESTS.glob("*.json"))
+                for patch in load_manifest(manifest_path).patches
+            ]
+            self.assertTrue(patches)
+            for patch in patches:
+                destination = source / patch.path
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes((REPO_ROOT / patch.path).read_bytes())
+            run("add", ".")
+            run(
+                "-c", "user.name=CI", "-c", "user.email=ci@example.invalid",
+                "-c", "commit.gpgSign=false", "commit", "-m", "checkout fixture",
+            )
+            run("-c", "core.autocrlf=true", "clone", "--no-local", str(source), str(checkout))
+            self.assertEqual(
+                (checkout / "ordinary.txt").read_bytes(), b"first\r\nsecond\r\n",
+            )
+            for patch in patches:
+                with self.subTest(patch=patch.path):
+                    self.assertEqual(
+                        hashlib.sha256((checkout / patch.path).read_bytes()).hexdigest(),
+                        patch.sha256,
+                    )
 
     def test_v8_runner_is_historical_not_an_active_manifest(self) -> None:
         self.assertFalse((MANIFESTS / "v8-runner.json").exists())

@@ -2,7 +2,7 @@
   "schemaVersion": 3,
   "name": "rlm-tools-bsl",
   "version": "1.33.0",
-  "buildRevision": 3,
+  "buildRevision": 4,
   "source": {
     "kind": "release",
     "repository": "https://github.com/Dach-Coin/rlm-tools-bsl",
@@ -18,7 +18,16 @@
       }
     ]
   },
-  "patches": [],
+  "patches": [
+    {
+      "path": "patches/rlm-tools-bsl/0001-owned-lifecycle.patch",
+      "sha256": "950ceb96e95168ad161e516e651f892cdb7af756caf7823266f6d42f08500b60"
+    },
+    {
+      "path": "patches/rlm-tools-bsl/0002-owned-test-fixtures.patch",
+      "sha256": "bcdca602b74f525df954a5a48297489da853da5a15591f0d835f22651bf0ab45"
+    }
+  ],
   "builder": {
     "kind": "python-nuitka-standalone",
     "pythonVersion": "3.12.10",

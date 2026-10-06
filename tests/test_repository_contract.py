@@ -30,7 +30,7 @@ class RepositoryContractTests(unittest.TestCase):
                 "release",
                 "v1.33.0",
                 "3e6920cd015a61af4ba7aa1a5f1fedd8bc935549",
-                "rlm-tools-bsl-v1.33.0-build.3",
+                "rlm-tools-bsl-v1.33.0-build.4",
             ),
             "bsl-analyzer": (
                 "release",
@@ -46,7 +46,13 @@ class RepositoryContractTests(unittest.TestCase):
                 self.assertEqual(manifest.source.ref, ref)
                 self.assertEqual(manifest.source.commit, commit)
                 self.assertEqual(release_tag(manifest), release)
-                self.assertEqual(manifest.patches, ())
+                self.assertEqual(
+                    tuple(patch.path for patch in manifest.patches),
+                    (
+                        "patches/rlm-tools-bsl/0001-owned-lifecycle.patch",
+                        "patches/rlm-tools-bsl/0002-owned-test-fixtures.patch",
+                    ) if name == "rlm-tools-bsl" else (),
+                )
                 license_names = [item.asset_name for item in manifest.license.files]
                 self.assertEqual(len(license_names), len(set(license_names)))
 

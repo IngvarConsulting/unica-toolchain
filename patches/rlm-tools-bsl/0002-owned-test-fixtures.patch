@@ -1,0 +1,166 @@
+diff --git a/tests/test_bsl_helpers.py b/tests/test_bsl_helpers.py
+index 28e94c4..1145948 100644
+--- a/tests/test_bsl_helpers.py
++++ b/tests/test_bsl_helpers.py
+@@ -5641,11 +5641,18 @@ def test_cfe_instead_with_visible_continue_keeps_main_delegates_in_hint():
+ def test_find_register_movements_finds_post_build_main_handler():
+     """Main ObjectModule, созданный после build, входит в точный live-сигнал даже
+     когда generic glob и список modules читаются из stale SQLite."""
++    from pathlib import Path
++
++    post_build_body = _DELEGATED.replace(
++        "    ОбщийМодульУчета",
++        '    МаркерПослеСборки = "NEW_HANDLER_AFTER_BUILD";\n    ОбщийМодульУчета',
++        1,
++    )
+     with tempfile.TemporaryDirectory() as tmpdir:
+         bsl, reader = _make_posting_env(
+             tmpdir,
+             {"ТестДок": ""},
+-            post_index_object_modules={"ТестДок": _DELEGATED},
++            post_index_object_modules={"ТестДок": post_build_body},
+             index_backed_glob=True,
+         )
+         try:
+@@ -5657,7 +5664,18 @@ def test_find_register_movements_finds_post_build_main_handler():
+             assert result["code_registers"] == [], result
+             assert result.get("posting_handler_present") is True, result
+             hint = result.get("hint", "").replace("\\", "/")
+-            assert "Documents/ТестДок/Ext/ObjectModule.bsl" in hint, hint
++            match = re.search(r"read_procedure\('([^']+)', 'ОбработкаПроведения'\)", hint)
++            assert match is not None, hint
++            hint_path = match.group(1)
++            base = Path(tmpdir) / "cf"
++            expected_module = base / "Documents" / "ТестДок" / "Ext" / "ObjectModule.bsl"
++            assert (base / hint_path).resolve().is_relative_to(base.resolve()), hint_path
++            assert (base / hint_path).samefile(expected_module), hint_path
++            fresh_handler = bsl["read_procedure"](hint_path, "ОбработкаПроведения")
++            assert fresh_handler is not None, hint
++            assert "ОбработкаПроведения" in fresh_handler, fresh_handler
++            assert "NEW_HANDLER_AFTER_BUILD" in fresh_handler, fresh_handler
++            assert "ОбщийМодульУчета.ОтразитьВУчете" in fresh_handler, fresh_handler
+             assert "ОбщийМодульУчета.ОтразитьВУчете" in hint, hint
+ 
+             # Compact-профиль сохраняет свой index-prefilter: новый module-row не
+diff --git a/tests/test_extension_overrides.py b/tests/test_extension_overrides.py
+index 151b338..c8f8e55 100644
+--- a/tests/test_extension_overrides.py
++++ b/tests/test_extension_overrides.py
+@@ -317,11 +317,11 @@ class _FakeOverridesReader:
+         return list(self._rows)
+ 
+ 
+-def _make_bsl_with_reader(idx_reader):
++def _make_bsl_with_reader(idx_reader, *, base_path="/nonexistent"):
+     from rlm_tools_bsl.bsl_helpers import make_bsl_helpers
+ 
+     return make_bsl_helpers(
+-        base_path="/nonexistent",
++        base_path=base_path,
+         resolve_safe=lambda p: __import__("pathlib").Path(p),
+         read_file_fn=lambda p: "",
+         grep_fn=lambda pat, path="": [],
+@@ -545,9 +545,12 @@ class TestGetOverridesTruncated:
+         assert res["overrides"][0]["extension_root"] == "/ext/known", res
+         assert res["_meta"]["failed_extension_roots"][0]["error"] == "UnknownConfigRole", res
+ 
+-    def test_find_ext_overrides_truncated(self, monkeypatch):
++    def test_find_ext_overrides_truncated(self, monkeypatch, tmp_path):
+         import rlm_tools_bsl.extension_detector as ed
+ 
++        extension_root = tmp_path / "neighborhood" / "group" / "extension"
++        extension_root.mkdir(parents=True)
++
+         big = [{"target_method": f"M{i}", "annotation": "Перед"} for i in range(250)]
+ 
+         def _find(_p, _o=None, diagnostics=None):
+@@ -556,16 +559,19 @@ class TestGetOverridesTruncated:
+             return list(big)
+ 
+         monkeypatch.setattr(ed, "find_extension_overrides", _find)
+-        bsl = _make_bsl_with_reader(None)
+-        res = bsl["find_ext_overrides"]("/ext/path")
++        bsl = _make_bsl_with_reader(None, base_path=str(extension_root))
++        res = bsl["find_ext_overrides"](str(extension_root))
+         assert res["total"] == 250
+         assert len(res["overrides"]) == 200
+         assert res["truncated"] is True
+         assert res["partial"] is False
+ 
+-    def test_find_ext_overrides_not_truncated(self, monkeypatch):
++    def test_find_ext_overrides_not_truncated(self, monkeypatch, tmp_path):
+         import rlm_tools_bsl.extension_detector as ed
+ 
++        extension_root = tmp_path / "neighborhood" / "group" / "extension"
++        extension_root.mkdir(parents=True)
++
+         small = [{"target_method": f"M{i}", "annotation": "Перед"} for i in range(5)]
+ 
+         def _find(_p, _o=None, diagnostics=None):
+@@ -574,8 +580,8 @@ class TestGetOverridesTruncated:
+             return list(small)
+ 
+         monkeypatch.setattr(ed, "find_extension_overrides", _find)
+-        bsl = _make_bsl_with_reader(None)
+-        res = bsl["find_ext_overrides"]("/ext/path")
++        bsl = _make_bsl_with_reader(None, base_path=str(extension_root))
++        res = bsl["find_ext_overrides"](str(extension_root))
+         assert res["total"] == 5
+         assert res["truncated"] is False
+         assert res["partial"] is True
+diff --git a/tests/test_git_search.py b/tests/test_git_search.py
+index 0b635da..9d69f87 100644
+--- a/tests/test_git_search.py
++++ b/tests/test_git_search.py
+@@ -445,11 +445,11 @@ def test_git_search_names_broken_regex_instead_of_blaming_git(repo):
+     assert not (fixed and "error" in fixed[0]), fixed
+ 
+ 
+-def test_git_search_classifies_python_only_regex_by_gits_own_verdict(repo):
++def test_git_search_classifies_python_only_regex_by_gits_own_verdict(repo, monkeypatch):
+     """Python-проверка ПРИНЦИПИАЛЬНО не закрывает POSIX ERE, и это не лечится ещё одной эвристикой.
+ 
+     `re` — НАДМНОЖЕСТВО ERE: lookahead `(?=a)` и именованные группы `(?P<x>a)` компилируются в
+-    Python, а `git grep -E` их отвергает — rc=128, «Invalid preceding regular expression». Значит
++    Python, а `git grep -E` их отвергает с собственным сообщением. Значит
+     предварительный re.compile их ПРОПУСКАЕТ, и раньше они уезжали в «git grep failed or timed
+     out»: исходный дефект (агент чинит не своё) выживал, а hint при этом ещё и уверял, что
+     аргументы проверены.
+@@ -457,14 +457,35 @@ def test_git_search_classifies_python_only_regex_by_gits_own_verdict(repo):
+     Правильный источник истины — САМ git: он называет и pattern, и причину. `_git_grep` отдаёт
+     rc+stderr через `err`, и хелпер эту причину доносит, а не угадывает. Тест пинит и это:
+     сообщение git обязано долетать до агента."""
++    real_run = subprocess.run
++    git_verdicts = []
++
++    def observe_git_verdict(args, *positional, **kwargs):
++        result = real_run(args, *positional, **kwargs)
++        if isinstance(args, (list, tuple)) and "grep" in args and "-E" in args:
++            git_verdicts.append((tuple(args), result.returncode, result.stderr))
++        return result
++
++    monkeypatch.setattr(bsl_index_mod.subprocess, "run", observe_git_verdict)
+     bsl = _make_bsl(repo)
+     for pat in ("(?=a)", "(?P<x>a)", "(?<=a)b"):
++        git_verdicts.clear()
+         out = bsl["git_search"](pat, regex=True)
+         assert len(out) == 1 and "error" in out[0], (pat, out)
+         assert "pattern" in out[0]["error"], f"{pat!r}: причина снова не названа: {out[0]['error']}"
+         assert "git grep failed" not in out[0]["error"], f"{pat!r}: снова валим на git: {out[0]['error']}"
+-        # Подлинное сообщение git долетает до агента — оно точнее любой нашей формулировки.
+-        assert "regular expression" in out[0]["error"].lower() or "unmatched" in out[0]["error"].lower(), out[0]
++        # Наблюдаем именно реальный subprocess, не подменяя его аргументы или ответ.
++        # GNU/BSD Git по-разному формулируют ошибку; должен дойти собственный вердикт.
++        assert len(git_verdicts) == 1, git_verdicts
++        command, returncode, raw_stderr = git_verdicts[0]
++        base_command = bsl_index_mod._git_base_cmd(str(repo))
++        assert base_command is not None
++        assert command[: len(base_command)] == tuple(base_command)
++        assert command[command.index("-e") + 1] == pat
++        assert returncode >= 2, git_verdicts[0]
++        stderr = (raw_stderr or "").strip()
++        assert stderr, git_verdicts[0]
++        assert stderr in out[0]["error"], out[0]
+         assert "POSIX ERE" in out[0]["hint"], out[0]["hint"]
+         assert "regex=False" in out[0]["hint"], out[0]["hint"]
+ 

@@ -39,8 +39,39 @@ jobs:
       - name: Validate GitHub Actions syntax
         run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7
 
-  rlm-standalone-smoke:
+  rlm-source-runtime-tests:
     needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12.10"
+      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: "0.11.29"
+          enable-cache: false
+      - name: Apply verified owned patches to the pinned RLM source
+        run: >-
+          python scripts/toolchain.py validate-source
+          --manifest manifests/rlm-tools-bsl.json --repo-root .
+          --work-dir .build/ci-rlm-runtime --out-dir dist/ci-rlm-runtime
+      - name: Install frozen upstream test dependencies
+        run: >-
+          uv sync --frozen --no-default-groups --extra dev
+          --directory .build/ci-rlm-runtime/source --python python
+      - name: Verify patched runtime and existing upstream behavior
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/rlm-owned-suite/run/leaf"
+          export TMPDIR="${RUNNER_TEMP}/rlm-owned-suite/run/leaf"
+          uv run --frozen --no-default-groups --extra dev \
+            --directory .build/ci-rlm-runtime/source pytest tests/ -q
+
+  rlm-standalone-smoke:
+    needs: [test, rlm-source-runtime-tests]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     strategy:

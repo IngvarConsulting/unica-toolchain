@@ -1,4 +1,5 @@
 from pathlib import Path
+import hashlib
 import unittest
 
 from toolchain.manifest import (
@@ -20,15 +21,23 @@ class RlmManifestTests(unittest.TestCase):
         self.assertIsInstance(manifest.builder, PythonNuitkaStandaloneSpec)
         self.assertEqual(manifest.name, "rlm-tools-bsl")
         self.assertEqual(manifest.version, "1.33.0")
-        self.assertEqual(manifest.build_revision, 3)
+        self.assertEqual(manifest.build_revision, 4)
         self.assertEqual(manifest.source.kind, "release")
         self.assertEqual(manifest.source.ref, "v1.33.0")
         self.assertEqual(
             manifest.source.commit,
             "3e6920cd015a61af4ba7aa1a5f1fedd8bc935549",
         )
-        self.assertEqual(release_tag(manifest), "rlm-tools-bsl-v1.33.0-build.3")
-        self.assertEqual(manifest.patches, ())
+        self.assertEqual(release_tag(manifest), "rlm-tools-bsl-v1.33.0-build.4")
+        self.assertEqual(
+            tuple(patch.path for patch in manifest.patches),
+            (
+                "patches/rlm-tools-bsl/0001-owned-lifecycle.patch",
+                "patches/rlm-tools-bsl/0002-owned-test-fixtures.patch",
+            ),
+        )
+        for patch in manifest.patches:
+            self.assertEqual(hashlib.sha256((REPO_ROOT / patch.path).read_bytes()).hexdigest(), patch.sha256)
 
         self.assertEqual(
             [

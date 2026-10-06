@@ -1,0 +1,775 @@
+diff --git a/src/rlm_tools_bsl/_sandbox_protocol.py b/src/rlm_tools_bsl/_sandbox_protocol.py
+index b0e0d21..5e3ca3f 100644
+--- a/src/rlm_tools_bsl/_sandbox_protocol.py
++++ b/src/rlm_tools_bsl/_sandbox_protocol.py
+@@ -61,6 +61,15 @@ def _reject_constant(name: str):
+     raise SandboxProtocolError(f"frame contains non-JSON constant: {name}")
+ 
+ 
++def _unique_json_object(pairs):
++    obj = {}
++    for key, value in pairs:
++        if key in obj:
++            raise SandboxProtocolError("frame contains duplicate JSON field")
++        obj[key] = value
++    return obj
++
++
+ def _check_depth(obj, depth: int = 0) -> None:
+     if depth > _MAX_DEPTH:
+         raise SandboxProtocolError(f"frame structure deeper than {_MAX_DEPTH} levels")
+@@ -105,7 +114,7 @@ def decode_frame(data, max_bytes: int) -> dict:
+         # parse_constant отсекает NaN/Infinity/-Infinity: стандартный json их
+         # принимает, хотя это не валидный JSON, а дальше они уехали бы в ответ
+         # агенту и в json.dumps без ошибки.
+-        obj = json.loads(text, parse_constant=_reject_constant)
++        obj = json.loads(text, parse_constant=_reject_constant, object_pairs_hook=_unique_json_object)
+     except SandboxProtocolError:
+         raise
+     except (ValueError, RecursionError):
+diff --git a/src/rlm_tools_bsl/sandbox.py b/src/rlm_tools_bsl/sandbox.py
+index e8decdf..a0666af 100644
+--- a/src/rlm_tools_bsl/sandbox.py
++++ b/src/rlm_tools_bsl/sandbox.py
+@@ -709,13 +709,13 @@ class Sandbox:
+                     return f"subscript по ключу '{key.value}' запрещён в песочнице"
+         return None
+ 
+-    def execute(self, code: str) -> ExecutionResult:
++    def execute(self, code: str, *, before_execution=None) -> ExecutionResult:
+         # Порядок замков единый (§14.3): instance execute lock → global inline
+         # stdout lock → redirect/capture → timeout → exec.
+         with self._execute_lock:
+-            return self._execute_locked(code)
++            return self._execute_locked(code, before_execution=before_execution)
+ 
+-    def _execute_locked(self, code: str) -> ExecutionResult:
++    def _execute_locked(self, code: str, *, before_execution=None) -> ExecutionResult:
+         self._helper_calls.clear()
+         self._execute_saturated.clear()
+         blocked = self._validate_readonly(code)
+@@ -735,6 +735,8 @@ class Sandbox:
+ 
+         try:
+             with _INLINE_STDOUT_LOCK:
++                if before_execution is not None:
++                    before_execution()
+                 with contextlib.redirect_stdout(stdout_capture):
+                     with self._execution_timeout():
+                         # Явное имя вместо дефолтного "<string>": в process-режиме worker
+diff --git a/src/rlm_tools_bsl/sandbox_backend.py b/src/rlm_tools_bsl/sandbox_backend.py
+index f29d540..21cf164 100644
+--- a/src/rlm_tools_bsl/sandbox_backend.py
++++ b/src/rlm_tools_bsl/sandbox_backend.py
+@@ -188,7 +188,7 @@ class InlineSandboxBackend:
+             self._state = "executing"
+             self._executing = True
+         try:
+-            result = self._sandbox.execute(code)
++            result = self._sandbox.execute(code, before_execution=self._check_execution_admission)
+         finally:
+             with self._state_lock:
+                 self._executing = False
+@@ -204,6 +204,13 @@ class InlineSandboxBackend:
+             generation=self.generation,
+         )
+ 
++    def _check_execution_admission(self) -> None:
++        # Sandbox invokes this after its instance/global stdout locks. A revoke
++        # while queued cannot admit user code; after this gate stop is cooperative.
++        with self._state_lock:
++            if self._state in ("closing", "closed"):
++                raise SandboxClosedError(f"sandbox backend is {self._state} (reason: {self._close_reason})")
++
+     # -- lifecycle ----------------------------------------------------------
+ 
+     def request_close(self, reason: str) -> None:
+@@ -226,8 +233,9 @@ class InlineSandboxBackend:
+         execute, остановив уборку всех остальных сессий, и (б) в другом
+         interleaving закрыть соединение под работающим кодом. Поэтому пока
+         execute активен возвращаем ``residual`` — reaper повторит позже; а на
+-        исчерпании deadline отдаём закрытие отдельному daemon-потоку, чтобы
+-        handle всё-таки освободился, но reaper не блокировался.
++        исчерпании observation deadline сохраняем residual до фактического
++        завершения execute; reaper не теряет владельца и не закрывает reader
++        под работающим кодом.
+         """
+         with self._close_lock:
+             return self._finish_close_locked(deadline)
+@@ -255,37 +263,21 @@ class InlineSandboxBackend:
+         with self._state_lock:
+             if self._state == "closed":
+                 return CloseReport(closed=True)
++            self._state = "closing"
+             executing = self._executing
+-        if executing and time.monotonic() < deadline:
++        if executing:
+             return CloseReport(closed=False, residual=True)
+         report = CloseReport(closed=True)
+         reader, self._idx_reader = self._idx_reader, None
+         if reader is not None:
+-            if executing:
+-                # Deadline исчерпан, код всё ещё крутится: отцепляем закрытие,
+-                # чтобы не заблокировать reaper. Поток закроет соединение, как
+-                # только helper отпустит lock reader-а.
+-                report.forced = True
+-                report.errors.append("idx_reader.close deferred to detached thread (execute still running)")
+-                threading.Thread(
+-                    target=self._close_reader_detached, args=(reader,), name="inline-reader-close", daemon=True
+-                ).start()
+-            else:
+-                try:
+-                    reader.close()
+-                except Exception as exc:  # noqa: BLE001 — teardown не должен падать
+-                    report.errors.append(f"idx_reader.close: {type(exc).__name__}: {exc}")
++            try:
++                reader.close()
++            except Exception as exc:  # noqa: BLE001 — teardown must not fail
++                report.errors.append(f"idx_reader.close: {type(exc).__name__}: {exc}")
+         with self._state_lock:
+             self._state = "closed"
+         return report
+ 
+-    @staticmethod
+-    def _close_reader_detached(reader) -> None:
+-        try:
+-            reader.close()
+-        except Exception:  # noqa: BLE001 — teardown не должен падать
+-            logger.warning("inline backend: deferred idx_reader.close failed", exc_info=True)
+-
+     # -- internals ----------------------------------------------------------
+ 
+     def _compute_prefixes(self) -> tuple[list[str], str]:
+diff --git a/src/rlm_tools_bsl/server.py b/src/rlm_tools_bsl/server.py
+index 19b2efb..508003c 100644
+--- a/src/rlm_tools_bsl/server.py
++++ b/src/rlm_tools_bsl/server.py
+@@ -1,4 +1,5 @@
+ import argparse
++from contextlib import ExitStack
+ import importlib.metadata
+ import json
+ import logging
+@@ -619,6 +620,34 @@ def _rlm_start(
+     execution_timeout_seconds: int = 45,
+     include_metadata: bool = False,
+     project: str | None = None,
++) -> str:
++    with ExitStack() as startup_scope:
++        return _rlm_start_owned(
++            path=path,
++            query=query,
++            effort=effort,
++            max_output_chars=max_output_chars,
++            max_llm_calls=max_llm_calls,
++            max_execute_calls=max_execute_calls,
++            execution_timeout_seconds=execution_timeout_seconds,
++            include_metadata=include_metadata,
++            project=project,
++            _startup_scope=startup_scope,
++        )
++
++
++def _rlm_start_owned(
++    path: str | None,
++    query: str,
++    effort: str = "auto",
++    max_output_chars: int = 15_000,
++    max_llm_calls: int | None = None,
++    max_execute_calls: int | None = None,
++    execution_timeout_seconds: int = 45,
++    include_metadata: bool = False,
++    project: str | None = None,
++    *,
++    _startup_scope: ExitStack,
+ ) -> str:
+     t0 = time.monotonic()
+     with _sandboxes_lock:
+@@ -711,7 +740,7 @@ def _rlm_start(
+     effort_config = EFFORT_LEVELS.get(effort, EFFORT_LEVELS["medium"])
+ 
+     try:
+-        session_id = session_manager.create(
++        session_id, startup_lease = session_manager.create_retained(
+             path=resolved,
+             query=query,
+             max_output_chars=max_output_chars,
+@@ -721,6 +750,8 @@ def _rlm_start(
+     except RuntimeError as e:
+         return json.dumps({"error": str(e)}, ensure_ascii=False)
+ 
++    _startup_scope.callback(startup_lease.close)
++
+     try:
+         from rlm_tools_bsl.cache import touch_project_cache
+ 
+@@ -1364,6 +1395,21 @@ def _rlm_execute(
+     code: str,
+     detail_level: Literal["compact", "usage", "full"] = "compact",
+     max_new_variables: int = 20,
++) -> str:
++    lease = session_manager.acquire(session_id)
++    if lease is None:
++        return json.dumps({"error": f"Session '{session_id}' not found or expired"}, ensure_ascii=False)
++    with lease as session:
++        return _rlm_execute_owned(session_id, code, detail_level, max_new_variables, session=session)
++
++
++def _rlm_execute_owned(
++    session_id: str,
++    code: str,
++    detail_level: Literal["compact", "usage", "full"] = "compact",
++    max_new_variables: int = 20,
++    *,
++    session,
+ ) -> str:
+     t0 = time.monotonic()
+     logger.info("rlm_execute: session=%s code_len=%d", session_id, len(code))
+@@ -1371,10 +1417,6 @@ def _rlm_execute(
+     # Сильные локальные ссылки на session/backend до конца ответа (§9.1.2):
+     # после снятия из registries активный execute завершает controlled response
+     # на этих же объектах и не ищет их повторно.
+-    session = session_manager.get(session_id)
+-    if not session:
+-        return json.dumps({"error": f"Session '{session_id}' not found or expired"}, ensure_ascii=False)
+-
+     with _sandboxes_lock:
+         backend = _sandboxes.get(session_id)
+     if not backend:
+diff --git a/src/rlm_tools_bsl/session.py b/src/rlm_tools_bsl/session.py
+index 033e46d..805be02 100644
+--- a/src/rlm_tools_bsl/session.py
++++ b/src/rlm_tools_bsl/session.py
+@@ -23,6 +23,7 @@ class Session:
+     execute_calls: int = 0
+     total_in_chars: int = 0
+     total_out_chars: int = 0
++    _operation_pins: int = field(default=0, repr=False, compare=False)
+     # v1.29.0 §9.1: сериализация двух rlm_execute ОДНОЙ сессии. Держится только
+     # исполняющим путём _rlm_execute; rlm_end/TTL-eviction/shutdown его НИКОГДА
+     # не берут (иначе teardown ждал бы пользовательский timeout до 300с).
+@@ -30,6 +31,30 @@ class Session:
+     execution_lock: threading.RLock = field(default_factory=threading.RLock, repr=False, compare=False)
+ 
+ 
++class SessionLease:
++    """One registered session owner, released without reviving another life."""
++
++    def __init__(self, manager, session: Session):
++        self._manager = manager
++        self.session = session
++        self._closed = False
++
++    def close(self) -> None:
++        with self._manager._lock:
++            if self._closed:
++                return
++            self._closed = True
++            self.session._operation_pins -= 1
++            if self._manager._sessions.get(self.session.session_id) is self.session:
++                self.session.last_used = time.time()
++
++    def __enter__(self):
++        return self.session
++
++    def __exit__(self, *exc):
++        self.close()
++
++
+ class SessionManager:
+     def __init__(
+         self,
+@@ -69,24 +94,56 @@ class SessionManager:
+         max_llm_calls: int = 50,
+         max_execute_calls: int = 50,
+     ) -> str:
++        session_id, _ = self._create(path, query, max_output_chars, max_llm_calls, max_execute_calls, retained=False)
++        return session_id
++
++    def create_retained(
++        self,
++        path: str,
++        query: str,
++        max_output_chars: int = 15_000,
++        max_llm_calls: int = 50,
++        max_execute_calls: int = 50,
++    ) -> tuple[str, SessionLease]:
++        return self._create(path, query, max_output_chars, max_llm_calls, max_execute_calls, retained=True)
++
++    def _create(self, path, query, max_output_chars, max_llm_calls, max_execute_calls, *, retained):
+         with self._lock:
+             evicted = self._cleanup_expired_locked()
+             at_capacity = len(self._sessions) >= self._max_sessions
+             session_id = None
++            lease = None
+             if not at_capacity:
+                 session_id = uuid.uuid4().hex[:12]
+-                self._sessions[session_id] = Session(
++                session = Session(
+                     session_id=session_id,
+                     path=path,
+                     query=query,
+                     max_output_chars=max_output_chars,
+                     max_llm_calls=max_llm_calls,
+                     max_execute_calls=max_execute_calls,
++                    _operation_pins=1 if retained else 0,
+                 )
++                self._sessions[session_id] = session
++                if retained:
++                    lease = SessionLease(self, session)
+         self._fire_on_evict(evicted)
+         if at_capacity:
+             raise RuntimeError(f"Cannot create session: max sessions ({self._max_sessions}) reached")
+-        return session_id
++        return session_id, lease
++
++    def acquire(self, session_id: str) -> SessionLease | None:
++        """Pin the exact registered object before callers consult its backend."""
++        with self._lock:
++            evicted = self._cleanup_expired_locked()
++            session = self._sessions.get(session_id)
++            lease = None
++            if session is not None:
++                session._operation_pins += 1
++                session.last_used = time.time()
++                lease = SessionLease(self, session)
++        self._fire_on_evict(evicted)
++        return lease
+ 
+     def get(self, session_id: str) -> Session | None:
+         with self._lock:
+@@ -123,6 +180,8 @@ class SessionManager:
+         now = time.time()
+         expired: list[str] = []
+         for sid, s in self._sessions.items():
++            if s._operation_pins:
++                continue
+             timeout = self._timeout_idle if s.execute_calls == 0 else self._timeout_active
+             if now - s.last_used > timeout:
+                 expired.append(sid)
+diff --git a/tests/test_unica_lifecycle_contract.py b/tests/test_unica_lifecycle_contract.py
+new file mode 100644
+index 0000000..418b190
+--- /dev/null
++++ b/tests/test_unica_lifecycle_contract.py
+@@ -0,0 +1,420 @@
++"""Owned #1119 deadline/owner contract; real SDK/backend paths, no replacement engine."""
++
++import json
++import threading
++import time
++from types import SimpleNamespace
++
++import pytest
++
++from _process_test_utils import make_cf_project
++from rlm_tools_bsl import server
++from rlm_tools_bsl import session as session_module
++from rlm_tools_bsl import sandbox as sandbox_module
++from rlm_tools_bsl._sandbox_protocol import SandboxProtocolError, decode_frame
++from rlm_tools_bsl.sandbox import Sandbox
++from rlm_tools_bsl.sandbox_backend import InlineSandboxBackend
++from rlm_tools_bsl.session import SessionManager
++
++
++def test_inline_close_after_grace_retains_actual_running_execution(tmp_path):
++    sandbox = Sandbox(base_path=str(tmp_path), execution_timeout_seconds=45)
++    backend = InlineSandboxBackend(sandbox, None, install_llm_tools=False)
++    entered, release = threading.Event(), threading.Event()
++    result = []
++
++    def actual_execution_gate():
++        entered.set()
++        assert release.wait(5), "test watchdog: release actual execution"
++
++    sandbox._namespace["actual_execution_gate"] = actual_execution_gate
++    worker = threading.Thread(target=lambda: result.append(backend.execute("actual_execution_gate(); print('winner')")))
++    worker.start()
++    try:
++        assert entered.wait(5), "real Sandbox.execute never reached gate"
++        assert backend._executing and worker.is_alive()
++        backend.request_close("explicit_end")
++        report = backend.finish_close(time.monotonic() - 1)
++        observed = (report.closed, report.residual, backend.state, backend._executing, worker.is_alive())
++    finally:
++        release.set()
++        worker.join(5)
++        backend.finish_close(time.monotonic() + 5)
++    assert not worker.is_alive()
++    assert observed == (False, True, "closing", True, True), "stop observation grace lost live inline ownership"
++    assert len(result) == 1 and result[0].stdout == "winner\n"
++
++
++def _real_inline_session(monkeypatch, tmp_path):
++    manager = SessionManager(timeout_idle_minutes=1, timeout_active_minutes=1)
++    manager.on_evict = server._release_session_resources
++    monkeypatch.setattr(server, "session_manager", manager)
++    monkeypatch.setenv("RLM_SANDBOX_MODE", "inline")
++    response = json.loads(server._rlm_start(path=make_cf_project(tmp_path / "cf"), query="owner retention"))
++    assert "error" not in response, response
++    sid = response["session_id"]
++    session = manager.get(sid)
++    with server._sandboxes_lock:
++        backend = server._sandboxes[sid]
++    return manager, sid, session, backend
++
++
++def test_real_active_execution_survives_session_ttl_cleanup(monkeypatch, tmp_path):
++    manager, sid, session, backend = _real_inline_session(monkeypatch, tmp_path)
++    entered, release = threading.Event(), threading.Event()
++    result = []
++
++    def actual_execution_gate():
++        entered.set()
++        assert release.wait(5), "test watchdog: release actual execution"
++
++    backend._sandbox._namespace["actual_execution_gate"] = actual_execution_gate
++    worker = threading.Thread(
++        target=lambda: result.append(
++            json.loads(server._rlm_execute(sid, "actual_execution_gate(); print('winner')", detail_level="full"))
++        )
++    )
++    worker.start()
++    try:
++        assert entered.wait(5)
++        assert backend._executing and session.execute_calls == 1
++        expired_epoch = session.last_used + 3600
++        monkeypatch.setattr(session_module, "time", SimpleNamespace(time=lambda: expired_epoch))
++        server._cleanup_expired_resources()
++        with manager._lock:
++            retained_session = manager._sessions.get(sid)
++        with server._sandboxes_lock:
++            retained_backend = server._sandboxes.get(sid)
++        snapshot = (retained_session is session, retained_backend is backend, backend.state)
++    finally:
++        release.set()
++        worker.join(5)
++        server._rlm_end(sid)
++    assert not worker.is_alive()
++    assert snapshot == (True, True, "executing"), "TTL cleanup revoked accepted running work"
++    assert len(result) == 1 and result[0]["error"] is None and result[0]["stdout"] == "winner\n"
++
++
++def test_queued_execution_is_retained_after_previous_execution_completes(monkeypatch, tmp_path):
++    manager, sid, session, backend = _real_inline_session(monkeypatch, tmp_path)
++    entered, release_first = threading.Event(), threading.Event()
++    queued, release_queue = threading.Event(), threading.Event()
++    original_lock = session.execution_lock
++    results = {}
++
++    class ObservedExecutionLock:
++        def __enter__(self):
++            if threading.current_thread().name == "owned-queued-execution":
++                queued.set()
++                assert release_queue.wait(5), "test watchdog: release queued lock observation"
++            original_lock.acquire()
++            return self
++
++        def __exit__(self, *exc):
++            original_lock.release()
++
++    session.execution_lock = ObservedExecutionLock()
++
++    def actual_execution_gate():
++        entered.set()
++        assert release_first.wait(5), "test watchdog: release first actual execution"
++
++    backend._sandbox._namespace["actual_execution_gate"] = actual_execution_gate
++    first = threading.Thread(
++        target=lambda: results.update(
++            first=json.loads(server._rlm_execute(sid, "actual_execution_gate(); print('first')"))
++        )
++    )
++    second = threading.Thread(
++        name="owned-queued-execution",
++        target=lambda: results.update(second=json.loads(server._rlm_execute(sid, "print('second')"))),
++    )
++    first.start()
++    try:
++        assert entered.wait(5)
++        second.start()
++        assert queued.wait(5), "second call did not reach the occupied execution lane"
++        release_first.set()
++        first.join(5)
++        assert not first.is_alive() and results["first"]["error"] is None
++        assert not backend._executing and second.is_alive()
++        expired_epoch = session.last_used + 3600
++        monkeypatch.setattr(session_module, "time", SimpleNamespace(time=lambda: expired_epoch))
++        server._cleanup_expired_resources()
++        with manager._lock:
++            retained_session = manager._sessions.get(sid)
++        with server._sandboxes_lock:
++            retained_backend = server._sandboxes.get(sid)
++        snapshot = (retained_session is session, retained_backend is backend)
++    finally:
++        release_first.set()
++        release_queue.set()
++        first.join(5)
++        if second.ident is not None:
++            second.join(5)
++        server._rlm_end(sid)
++    assert not first.is_alive() and not second.is_alive()
++    assert snapshot == (True, True), "TTL cleanup revoked a queued accepted call after running call finished"
++    assert results["second"]["error"] is None and results["second"]["stdout"] == "second\n"
++
++
++@pytest.mark.parametrize(
++    "raw",
++    [
++        b'{"protocol_version":1,"type":"ping","type":"execute","request_id":1,"generation":1}',
++        b'{"protocol_version":1,"type":"init","request_id":1,"generation":1,"payload":{"operation_deadline":{"mode":"none","mode":"finite"}}}',
++    ],
++)
++def test_ipc_duplicate_fields_cannot_choose_a_different_deadline_or_command(raw):
++    with pytest.raises(SandboxProtocolError, match="duplicate"):
++        decode_frame(raw, 1024 * 1024)
++
++
++def test_execute_pins_registered_session_before_backend_lookup(monkeypatch, tmp_path):
++    manager, sid, session, backend = _real_inline_session(monkeypatch, tmp_path)
++    lookup_entered, release_lookup = threading.Event(), threading.Event()
++    original_lock = server._sandboxes_lock
++    result = []
++
++    class ObservedBackendRegistryLock:
++        def __enter__(self):
++            if threading.current_thread().name == "owned-backend-lookup":
++                lookup_entered.set()
++                assert release_lookup.wait(5), "test watchdog: release backend lookup"
++            original_lock.acquire()
++            return self
++
++        def __exit__(self, *exc):
++            original_lock.release()
++
++    monkeypatch.setattr(server, "_sandboxes_lock", ObservedBackendRegistryLock())
++    worker = threading.Thread(
++        name="owned-backend-lookup",
++        target=lambda: result.append(json.loads(server._rlm_execute(sid, "print('lookup-owner')"))),
++    )
++    worker.start()
++    try:
++        assert lookup_entered.wait(5), "execute did not reach real backend lookup"
++        expired_epoch = session.last_used + 3600
++        monkeypatch.setattr(session_module, "time", SimpleNamespace(time=lambda: expired_epoch))
++        server._cleanup_expired_resources()
++        with manager._lock:
++            retained_session = manager._sessions.get(sid)
++        with original_lock:
++            retained_backend = server._sandboxes.get(sid)
++        observed = (retained_session is session, retained_backend is backend)
++    finally:
++        release_lookup.set()
++        worker.join(5)
++        server._rlm_end(sid)
++    assert not worker.is_alive()
++    assert observed == (True, True), "session was revoked between registration lookup and backend lookup"
++    assert len(result) == 1 and result[0]["error"] is None and result[0]["stdout"] == "lookup-owner\n"
++
++
++def test_legacy_idle_session_without_consumers_still_expires(monkeypatch, tmp_path):
++    manager, sid, session, backend = _real_inline_session(monkeypatch, tmp_path)
++    expired_epoch = session.last_used + 3600
++    monkeypatch.setattr(session_module, "time", SimpleNamespace(time=lambda: expired_epoch))
++    server._cleanup_expired_resources()
++    with manager._lock:
++        assert sid not in manager._sessions
++    with server._sandboxes_lock:
++        assert sid not in server._sandboxes
++    assert backend.state == "closed"
++
++
++def test_startup_session_is_retained_before_backend_registration(monkeypatch, tmp_path):
++    manager = SessionManager(timeout_idle_minutes=1, timeout_active_minutes=1)
++    manager.on_evict = server._release_session_resources
++    monkeypatch.setattr(server, "session_manager", manager)
++    monkeypatch.setenv("RLM_SANDBOX_MODE", "inline")
++    factory_entered, release_factory = threading.Event(), threading.Event()
++    original_factory = server._create_session_backend
++    response = []
++
++    def held_factory(*args, **kwargs):
++        factory_entered.set()
++        assert release_factory.wait(5), "test watchdog: release actual backend factory"
++        return original_factory(*args, **kwargs)
++
++    monkeypatch.setattr(server, "_create_session_backend", held_factory)
++    worker = threading.Thread(
++        target=lambda: response.append(
++            json.loads(server._rlm_start(path=make_cf_project(tmp_path / "cf"), query="startup owner"))
++        )
++    )
++    worker.start()
++    sid = None
++    try:
++        assert factory_entered.wait(5), "real start did not reach backend constructor"
++        with manager._lock:
++            assert len(manager._sessions) == 1
++            sid, session = next(iter(manager._sessions.items()))
++        expired_epoch = session.last_used + 3600
++        monkeypatch.setattr(session_module, "time", SimpleNamespace(time=lambda: expired_epoch))
++        server._cleanup_expired_resources()
++        with manager._lock:
++            retained = manager._sessions.get(sid) is session
++    finally:
++        release_factory.set()
++        worker.join(5)
++        if sid is not None:
++            server._rlm_end(sid)
++    assert not worker.is_alive()
++    assert retained, "TTL revoked accepted startup before backend registration"
++    assert len(response) == 1 and "error" not in response[0]
++
++
++def test_explicit_end_during_execution_does_not_reinsert_on_late_reply(monkeypatch, tmp_path):
++    manager, sid, session, backend = _real_inline_session(monkeypatch, tmp_path)
++    entered, release = threading.Event(), threading.Event()
++    replies = []
++
++    def actual_execution_gate():
++        entered.set()
++        assert release.wait(5), "test watchdog: release revoked inline execution"
++
++    backend._sandbox._namespace["actual_execution_gate"] = actual_execution_gate
++    worker = threading.Thread(
++        target=lambda: replies.append(
++            json.loads(server._rlm_execute(sid, "actual_execution_gate(); print('late-owner')"))
++        )
++    )
++    worker.start()
++    try:
++        assert entered.wait(5)
++        assert json.loads(server._rlm_end(sid)) == {"success": True}
++        with manager._lock:
++            assert sid not in manager._sessions
++        with server._sandboxes_lock:
++            assert sid not in server._sandboxes
++        assert backend._executing and worker.is_alive()
++        rejected = json.loads(server._rlm_execute(sid, "print('no replacement')"))
++        assert rejected["error"]
++    finally:
++        release.set()
++        worker.join(5)
++        backend.finish_close(time.monotonic() + 5)
++    assert not worker.is_alive()
++    assert len(replies) == 1
++    with manager._lock:
++        assert sid not in manager._sessions
++    with server._sandboxes_lock:
++        assert sid not in server._sandboxes
++    assert backend.state == "closed"
++
++
++def test_explicit_close_revokes_distinct_inline_session_waiting_for_global_stdout(monkeypatch, tmp_path):
++    first_sandbox = Sandbox(base_path=str(tmp_path), execution_timeout_seconds=45)
++    second_sandbox = Sandbox(base_path=str(tmp_path), execution_timeout_seconds=45)
++    first_backend = InlineSandboxBackend(first_sandbox, None, install_llm_tools=False)
++    second_backend = InlineSandboxBackend(second_sandbox, None, install_llm_tools=False)
++    first_entered, release_first, second_waiting = threading.Event(), threading.Event(), threading.Event()
++    side_effects, outcomes = [], {}
++    original_stdout_lock = sandbox_module._INLINE_STDOUT_LOCK
++
++    class ObservedStdoutLock:
++        def __enter__(self):
++            if threading.current_thread().name == "second-inline-global-wait":
++                second_waiting.set()
++            original_stdout_lock.acquire()
++            return self
++
++        def __exit__(self, *exc):
++            original_stdout_lock.release()
++
++    monkeypatch.setattr(sandbox_module, "_INLINE_STDOUT_LOCK", ObservedStdoutLock())
++
++    def actual_first_gate():
++        first_entered.set()
++        assert release_first.wait(5), "test watchdog: release global stdout owner"
++
++    first_sandbox._namespace["actual_first_gate"] = actual_first_gate
++    second_sandbox._namespace["forbidden_side_effect"] = lambda: side_effects.append("revoked code ran")
++
++    def execute_and_capture(key, backend, code):
++        try:
++            outcomes[key] = backend.execute(code)
++        except Exception as exc:
++            outcomes[key] = exc
++
++    first = threading.Thread(
++        target=execute_and_capture, args=("first", first_backend, "actual_first_gate(); print('first-owner')")
++    )
++    second = threading.Thread(
++        name="second-inline-global-wait",
++        target=execute_and_capture,
++        args=("second", second_backend, "forbidden_side_effect(); print('revoked')"),
++    )
++    first.start()
++    try:
++        assert first_entered.wait(5)
++        second.start()
++        assert second_waiting.wait(5), "second distinct session did not queue at actual global stdout lock"
++        assert second_backend._executing and second.is_alive()
++        second_backend.request_close("explicit_end_while_queued")
++    finally:
++        release_first.set()
++        first.join(5)
++        if second.ident is not None:
++            second.join(5)
++        first_backend.request_close("test_cleanup")
++        second_backend.request_close("test_cleanup")
++        first_backend.finish_close(time.monotonic() + 5)
++        second_backend.finish_close(time.monotonic() + 5)
++    assert not first.is_alive() and not second.is_alive()
++    assert not side_effects, "explicitly revoked queued inline code executed after another session released stdout"
++    assert outcomes["first"].error is None and outcomes["first"].stdout == "first-owner\n"
++    stopped = outcomes["second"]
++    assert isinstance(stopped, Exception) or stopped.error is not None
++
++
++def test_late_lease_release_does_not_touch_new_session_with_reused_identifier(monkeypatch, tmp_path):
++    manager = SessionManager()
++    sid, lease = manager.create_retained(str(tmp_path), "old owner")
++    original = lease.session
++    manager.end(sid)
++    monkeypatch.setattr(session_module.uuid, "uuid4", lambda: SimpleNamespace(hex=sid + "0" * 20))
++    replacement_id = manager.create(str(tmp_path), "new owner")
++    assert replacement_id == sid
++    with manager._lock:
++        replacement = manager._sessions[sid]
++    assert replacement is not original and replacement.query == "new owner"
++    before = (replacement.created_at, replacement.last_used, replacement._operation_pins)
++    monkeypatch.setattr(session_module, "time", SimpleNamespace(time=lambda: replacement.last_used + 1234))
++    lease.close()
++    lease.close()
++    with manager._lock:
++        assert manager._sessions[sid] is replacement
++    assert (replacement.created_at, replacement.last_used, replacement._operation_pins) == before
++    assert original._operation_pins == 0
++
++
++def test_failed_start_releases_retained_lease_without_keeping_idle_session(monkeypatch, tmp_path):
++    manager = SessionManager()
++    manager.on_evict = server._release_session_resources
++    monkeypatch.setattr(server, "session_manager", manager)
++    monkeypatch.setenv("RLM_SANDBOX_MODE", "inline")
++    created = []
++    real_create = manager.create_retained
++
++    def observed_create(*args, **kwargs):
++        sid, lease = real_create(*args, **kwargs)
++        created.append((sid, lease.session))
++        return sid, lease
++
++    def refused_factory(*args, **kwargs):
++        raise RuntimeError("controlled backend initialization refusal")
++
++    monkeypatch.setattr(manager, "create_retained", observed_create)
++    monkeypatch.setattr(server, "_create_session_backend", refused_factory)
++    reply = json.loads(server._rlm_start(path=make_cf_project(tmp_path / "cf"), query="failed startup"))
++    assert "controlled backend initialization refusal" in reply["error"]
++    assert len(created) == 1
++    sid, session = created[0]
++    assert session._operation_pins == 0
++    with manager._lock:
++        assert sid not in manager._sessions
++    with server._sandboxes_lock:
++        assert sid not in server._sandboxes

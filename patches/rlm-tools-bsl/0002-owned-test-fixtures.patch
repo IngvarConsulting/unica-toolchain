@@ -1,8 +1,8 @@
 diff --git a/tests/test_bsl_helpers.py b/tests/test_bsl_helpers.py
-index 28e94c4..1145948 100644
+index aca6bff..f0fb7ed 100644
 --- a/tests/test_bsl_helpers.py
 +++ b/tests/test_bsl_helpers.py
-@@ -5641,11 +5641,18 @@ def test_cfe_instead_with_visible_continue_keeps_main_delegates_in_hint():
+@@ -5702,11 +5702,18 @@ def test_cfe_instead_with_visible_continue_keeps_main_delegates_in_hint():
  def test_find_register_movements_finds_post_build_main_handler():
      """Main ObjectModule, созданный после build, входит в точный live-сигнал даже
      когда generic glob и список modules читаются из stale SQLite."""
@@ -22,7 +22,7 @@ index 28e94c4..1145948 100644
              index_backed_glob=True,
          )
          try:
-@@ -5657,7 +5664,18 @@ def test_find_register_movements_finds_post_build_main_handler():
+@@ -5718,7 +5725,18 @@ def test_find_register_movements_finds_post_build_main_handler():
              assert result["code_registers"] == [], result
              assert result.get("posting_handler_present") is True, result
              hint = result.get("hint", "").replace("\\", "/")
@@ -43,7 +43,7 @@ index 28e94c4..1145948 100644
  
              # Compact-профиль сохраняет свой index-prefilter: новый module-row не
 diff --git a/tests/test_extension_overrides.py b/tests/test_extension_overrides.py
-index 151b338..c8f8e55 100644
+index 3f18e0b..632578a 100644
 --- a/tests/test_extension_overrides.py
 +++ b/tests/test_extension_overrides.py
 @@ -317,11 +317,11 @@ class _FakeOverridesReader:
@@ -109,11 +109,11 @@ index 151b338..c8f8e55 100644
          assert res["truncated"] is False
          assert res["partial"] is True
 diff --git a/tests/test_git_search.py b/tests/test_git_search.py
-index 0b635da..9d69f87 100644
+index 09bca8f..f9ee908 100644
 --- a/tests/test_git_search.py
 +++ b/tests/test_git_search.py
-@@ -445,11 +445,11 @@ def test_git_search_names_broken_regex_instead_of_blaming_git(repo):
-     assert not (fixed and "error" in fixed[0]), fixed
+@@ -463,11 +463,11 @@ def test_git_search_names_broken_regex_instead_of_blaming_git(repo):
+     assert fixed["error"] is None, fixed
  
  
 -def test_git_search_classifies_python_only_regex_by_gits_own_verdict(repo):
@@ -126,30 +126,30 @@ index 0b635da..9d69f87 100644
      предварительный re.compile их ПРОПУСКАЕТ, и раньше они уезжали в «git grep failed or timed
      out»: исходный дефект (агент чинит не своё) выживал, а hint при этом ещё и уверял, что
      аргументы проверены.
-@@ -457,14 +457,35 @@ def test_git_search_classifies_python_only_regex_by_gits_own_verdict(repo):
+@@ -475,14 +475,35 @@ def test_git_search_classifies_python_only_regex_by_gits_own_verdict(repo):
      Правильный источник истины — САМ git: он называет и pattern, и причину. `_git_grep` отдаёт
      rc+stderr через `err`, и хелпер эту причину доносит, а не угадывает. Тест пинит и это:
      сообщение git обязано долетать до агента."""
-+    real_run = subprocess.run
++    real_run_git = bsl_index_mod.run_git
 +    git_verdicts = []
 +
 +    def observe_git_verdict(args, *positional, **kwargs):
-+        result = real_run(args, *positional, **kwargs)
++        result = real_run_git(args, *positional, **kwargs)
 +        if isinstance(args, (list, tuple)) and "grep" in args and "-E" in args:
 +            git_verdicts.append((tuple(args), result.returncode, result.stderr))
 +        return result
 +
-+    monkeypatch.setattr(bsl_index_mod.subprocess, "run", observe_git_verdict)
++    monkeypatch.setattr(bsl_index_mod, "run_git", observe_git_verdict)
      bsl = _make_bsl(repo)
      for pat in ("(?=a)", "(?P<x>a)", "(?<=a)b"):
 +        git_verdicts.clear()
          out = bsl["git_search"](pat, regex=True)
-         assert len(out) == 1 and "error" in out[0], (pat, out)
-         assert "pattern" in out[0]["error"], f"{pat!r}: причина снова не названа: {out[0]['error']}"
-         assert "git grep failed" not in out[0]["error"], f"{pat!r}: снова валим на git: {out[0]['error']}"
+         assert out["error"] and out["results"] == [], (pat, out)
+         assert "pattern" in out["error"], f"{pat!r}: причина снова не названа: {out['error']}"
+         assert "git grep failed" not in out["error"], f"{pat!r}: снова валим на git: {out['error']}"
 -        # Подлинное сообщение git долетает до агента — оно точнее любой нашей формулировки.
--        assert "regular expression" in out[0]["error"].lower() or "unmatched" in out[0]["error"].lower(), out[0]
-+        # Наблюдаем именно реальный subprocess, не подменяя его аргументы или ответ.
+-        assert "regular expression" in out["error"].lower() or "unmatched" in out["error"].lower(), out
++        # Наблюдаем именно реальный вызов git, не подменяя его аргументы или ответ.
 +        # GNU/BSD Git по-разному формулируют ошибку; должен дойти собственный вердикт.
 +        assert len(git_verdicts) == 1, git_verdicts
 +        command, returncode, raw_stderr = git_verdicts[0]
@@ -160,18 +160,18 @@ index 0b635da..9d69f87 100644
 +        assert returncode >= 2, git_verdicts[0]
 +        stderr = (raw_stderr or "").strip()
 +        assert stderr, git_verdicts[0]
-+        assert stderr in out[0]["error"], out[0]
-         assert "POSIX ERE" in out[0]["hint"], out[0]["hint"]
-         assert "regex=False" in out[0]["hint"], out[0]["hint"]
++        assert stderr in out["error"], out
+         assert "POSIX ERE" in out["hint"], out["hint"]
+         assert "regex=False" in out["hint"], out["hint"]
  
 diff --git a/tests/test_unica_lifecycle_contract.py b/tests/test_unica_lifecycle_contract.py
-index 418b190..c7671a7 100644
+index 36af599..0b8bb44 100644
 --- a/tests/test_unica_lifecycle_contract.py
 +++ b/tests/test_unica_lifecycle_contract.py
 @@ -17,6 +17,40 @@ from rlm_tools_bsl.sandbox_backend import InlineSandboxBackend
  from rlm_tools_bsl.session import SessionManager
-
-
+ 
+ 
 +def _owned_cf_project(tmp_path):
 +    # The real detector scans parent and grandparent. Both belong to this fixture.
 +    return make_cf_project(tmp_path / "group" / "neighborhood" / "cf")
@@ -218,15 +218,15 @@ index 418b190..c7671a7 100644
      assert "error" not in response, response
      sid = response["session_id"]
      session = manager.get(sid)
-@@ -232,6 +266,7 @@ def test_startup_session_is_retained_before_backend_registration(monkeypatch, tm
+@@ -239,6 +273,7 @@ def test_startup_session_is_retained_before_backend_registration(monkeypatch, tm
      factory_entered, release_factory = threading.Event(), threading.Event()
      original_factory = server._create_session_backend
      response = []
 +    project_path = _owned_cf_project(tmp_path)
-
+ 
      def held_factory(*args, **kwargs):
          factory_entered.set()
-@@ -241,13 +276,17 @@ def test_startup_session_is_retained_before_backend_registration(monkeypatch, tm
+@@ -248,13 +283,17 @@ def test_startup_session_is_retained_before_backend_registration(monkeypatch, tm
      monkeypatch.setattr(server, "_create_session_backend", held_factory)
      worker = threading.Thread(
          target=lambda: response.append(
@@ -246,8 +246,8 @@ index 418b190..c7671a7 100644
          with manager._lock:
              assert len(manager._sessions) == 1
              sid, session = next(iter(manager._sessions.items()))
-@@ -409,7 +448,7 @@ def test_failed_start_releases_retained_lease_without_keeping_idle_session(monke
-
+@@ -416,7 +455,7 @@ def test_failed_start_releases_retained_lease_without_keeping_idle_session(monke
+ 
      monkeypatch.setattr(manager, "create_retained", observed_create)
      monkeypatch.setattr(server, "_create_session_backend", refused_factory)
 -    reply = json.loads(server._rlm_start(path=make_cf_project(tmp_path / "cf"), query="failed startup"))
@@ -255,3 +255,28 @@ index 418b190..c7671a7 100644
      assert "controlled backend initialization refusal" in reply["error"]
      assert len(created) == 1
      sid, session = created[0]
+diff --git a/tests/test_v1_41_0.py b/tests/test_v1_41_0.py
+index 517aebb..d306062 100644
+--- a/tests/test_v1_41_0.py
++++ b/tests/test_v1_41_0.py
+@@ -1079,10 +1079,16 @@ class TestDeliveryLog:
+         inner_execute = backend._sandbox.execute
+         entered, release = threading.Event(), threading.Event()
+ 
+-        def slow_execute(code):
+-            entered.set()
+-            release.wait(30)
+-            return inner_execute(code)
++        def slow_execute(code, *, before_execution=None):
++            # Hold the call after its admission gate: the code is accepted and
++            # running when rlm_end arrives, not still queued for admission.
++            def admitted_and_running():
++                if before_execution is not None:
++                    before_execution()
++                entered.set()
++                release.wait(30)
++
++            return inner_execute(code, before_execution=admitted_and_running)
+ 
+         backend._sandbox.execute = slow_execute
+         box: dict = {}

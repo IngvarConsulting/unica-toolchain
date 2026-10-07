@@ -1,13 +1,13 @@
 {
   "schemaVersion": 3,
   "name": "rlm-tools-bsl",
-  "version": "1.33.0",
-  "buildRevision": 4,
+  "version": "1.42.0",
+  "buildRevision": 1,
   "source": {
     "kind": "release",
     "repository": "https://github.com/Dach-Coin/rlm-tools-bsl",
-    "ref": "v1.33.0",
-    "commit": "3e6920cd015a61af4ba7aa1a5f1fedd8bc935549"
+    "ref": "v1.42.0",
+    "commit": "9a84f24f0c156630e1d4e757b30070a13a56d0e0"
   },
   "license": {
     "spdx": "MIT",
@@ -21,11 +21,11 @@
   "patches": [
     {
       "path": "patches/rlm-tools-bsl/0001-owned-lifecycle.patch",
-      "sha256": "950ceb96e95168ad161e516e651f892cdb7af756caf7823266f6d42f08500b60"
+      "sha256": "41f064331a05da0aed2cce98d155c5084bb951b7e9cf9bb4456a866e43912850"
     },
     {
       "path": "patches/rlm-tools-bsl/0002-owned-test-fixtures.patch",
-      "sha256": "4a64bb2aeaca8cc53df37ec3a32880577f05ceb0ea67f341c02daefda1d6dbb5"
+      "sha256": "2ffe45e666e3bc4b5ac40a27bb21106d6c74b2c829527543a6e1ecfb2c600d9e"
     }
   ],
   "builder": {

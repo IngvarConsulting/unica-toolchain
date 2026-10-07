@@ -15,20 +15,20 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 class RlmManifestTests(unittest.TestCase):
-    def test_v1_33_release_keeps_upstream_entrypoints_and_renames_assets(self) -> None:
+    def test_v1_42_release_keeps_upstream_entrypoints_and_renames_assets(self) -> None:
         manifest = load_manifest(REPO_ROOT / "manifests" / "rlm-tools-bsl.json")
 
         self.assertIsInstance(manifest.builder, PythonNuitkaStandaloneSpec)
         self.assertEqual(manifest.name, "rlm-tools-bsl")
-        self.assertEqual(manifest.version, "1.33.0")
-        self.assertEqual(manifest.build_revision, 4)
+        self.assertEqual(manifest.version, "1.42.0")
+        self.assertEqual(manifest.build_revision, 1)
         self.assertEqual(manifest.source.kind, "release")
-        self.assertEqual(manifest.source.ref, "v1.33.0")
+        self.assertEqual(manifest.source.ref, "v1.42.0")
         self.assertEqual(
             manifest.source.commit,
-            "3e6920cd015a61af4ba7aa1a5f1fedd8bc935549",
+            "9a84f24f0c156630e1d4e757b30070a13a56d0e0",
         )
-        self.assertEqual(release_tag(manifest), "rlm-tools-bsl-v1.33.0-build.4")
+        self.assertEqual(release_tag(manifest), "rlm-tools-bsl-v1.42.0-build.1")
         self.assertEqual(
             tuple(patch.path for patch in manifest.patches),
             (

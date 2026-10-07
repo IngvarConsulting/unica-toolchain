@@ -1,8 +1,8 @@
 diff --git a/src/rlm_tools_bsl/_sandbox_protocol.py b/src/rlm_tools_bsl/_sandbox_protocol.py
-index b0e0d21..5e3ca3f 100644
+index 662b7bb..e5d87ff 100644
 --- a/src/rlm_tools_bsl/_sandbox_protocol.py
 +++ b/src/rlm_tools_bsl/_sandbox_protocol.py
-@@ -61,6 +61,15 @@ def _reject_constant(name: str):
+@@ -104,6 +104,15 @@ def _reject_constant(name: str):
      raise SandboxProtocolError(f"frame contains non-JSON constant: {name}")
  
  
@@ -18,7 +18,7 @@ index b0e0d21..5e3ca3f 100644
  def _check_depth(obj, depth: int = 0) -> None:
      if depth > _MAX_DEPTH:
          raise SandboxProtocolError(f"frame structure deeper than {_MAX_DEPTH} levels")
-@@ -105,7 +114,7 @@ def decode_frame(data, max_bytes: int) -> dict:
+@@ -148,7 +157,7 @@ def decode_frame(data, max_bytes: int) -> dict:
          # parse_constant отсекает NaN/Infinity/-Infinity: стандартный json их
          # принимает, хотя это не валидный JSON, а дальше они уехали бы в ответ
          # агенту и в json.dumps без ошибки.
@@ -28,10 +28,10 @@ index b0e0d21..5e3ca3f 100644
          raise
      except (ValueError, RecursionError):
 diff --git a/src/rlm_tools_bsl/sandbox.py b/src/rlm_tools_bsl/sandbox.py
-index e8decdf..a0666af 100644
+index 7ad6b90..5ab18e4 100644
 --- a/src/rlm_tools_bsl/sandbox.py
 +++ b/src/rlm_tools_bsl/sandbox.py
-@@ -709,13 +709,13 @@ class Sandbox:
+@@ -797,13 +797,13 @@ class Sandbox:
                      return f"subscript по ключу '{key.value}' запрещён в песочнице"
          return None
  
@@ -48,7 +48,7 @@ index e8decdf..a0666af 100644
          self._helper_calls.clear()
          self._execute_saturated.clear()
          blocked = self._validate_readonly(code)
-@@ -735,6 +735,8 @@ class Sandbox:
+@@ -823,6 +823,8 @@ class Sandbox:
  
          try:
              with _INLINE_STDOUT_LOCK:
@@ -58,10 +58,10 @@ index e8decdf..a0666af 100644
                      with self._execution_timeout():
                          # Явное имя вместо дефолтного "<string>": в process-режиме worker
 diff --git a/src/rlm_tools_bsl/sandbox_backend.py b/src/rlm_tools_bsl/sandbox_backend.py
-index f29d540..21cf164 100644
+index 19c87e0..9a7fe74 100644
 --- a/src/rlm_tools_bsl/sandbox_backend.py
 +++ b/src/rlm_tools_bsl/sandbox_backend.py
-@@ -188,7 +188,7 @@ class InlineSandboxBackend:
+@@ -207,7 +207,7 @@ class InlineSandboxBackend:
              self._state = "executing"
              self._executing = True
          try:
@@ -70,7 +70,7 @@ index f29d540..21cf164 100644
          finally:
              with self._state_lock:
                  self._executing = False
-@@ -204,6 +204,13 @@ class InlineSandboxBackend:
+@@ -223,6 +223,13 @@ class InlineSandboxBackend:
              generation=self.generation,
          )
  
@@ -84,7 +84,7 @@ index f29d540..21cf164 100644
      # -- lifecycle ----------------------------------------------------------
  
      def request_close(self, reason: str) -> None:
-@@ -226,8 +233,9 @@ class InlineSandboxBackend:
+@@ -245,8 +252,9 @@ class InlineSandboxBackend:
          execute, остановив уборку всех остальных сессий, и (б) в другом
          interleaving закрыть соединение под работающим кодом. Поэтому пока
          execute активен возвращаем ``residual`` — reaper повторит позже; а на
@@ -93,10 +93,19 @@ index f29d540..21cf164 100644
 +        исчерпании observation deadline сохраняем residual до фактического
 +        завершения execute; reaper не теряет владельца и не закрывает reader
 +        под работающим кодом.
-         """
-         with self._close_lock:
-             return self._finish_close_locked(deadline)
-@@ -255,37 +263,21 @@ class InlineSandboxBackend:
+ 
+         **v1.36.0 — одно ОСОЗНАННОЕ исключение из «reaper не блокируется».**
+         Inline-сессия владеет ещё и фоновым прогревом живого каталога, и его
+@@ -254,7 +262,7 @@ class InlineSandboxBackend:
+         не больше ``_PER_BACKEND_DEADLINE_SECONDS``, у ``rlm_end`` — 1 с). Отличие
+         от reader-а принципиально: reader может держать ПОЛЬЗОВАТЕЛЬСКИЙ код
+         неограниченно, а прогрев — только перечисление ФС, чья цена измерена и
+-        ограничена размером дерева. Отдать его daemon-потоку, как reader, нельзя:
++        ограничена размером дерева. Отдать его daemon-потоку до исчерпания deadline нельзя:
+         именно факт «обход этой сессии ещё идёт» и есть то, что ``residual``
+         обязан сообщить. Плата — до ``deadline`` задержки уборки СОСЕДНИХ сессий
+         в редком окне; ``force_abort``/последняя попытка reaper-а этого окна не
+@@ -286,26 +294,17 @@ class InlineSandboxBackend:
          with self._state_lock:
              if self._state == "closed":
                  return CloseReport(closed=True)
@@ -126,8 +135,21 @@ index f29d540..21cf164 100644
 +                reader.close()
 +            except Exception as exc:  # noqa: BLE001 — teardown must not fail
 +                report.errors.append(f"idx_reader.close: {type(exc).__name__}: {exc}")
-         with self._state_lock:
-             self._state = "closed"
+ 
+         # v1.36.0: inline-сессия владеет ещё и фоновым прогревом живого каталога.
+         # Порядок «сначала reader, потом prewarm» безопасен: `_ensure_live_bsl_catalog`
+@@ -329,8 +328,7 @@ class InlineSandboxBackend:
+                     # Deadline УЖЕ истёк — это ровно force-путь (`force_abort()` и
+                     # последняя попытка reaper-а передают `now - 1.0`, требуя
+                     # ДОВЕСТИ очистку, а не просить повтор). Просить здесь повтор
+-                    # значит сделать backend НЕзакрываемым навсегда. Отцепляем так
+-                    # же, как уже отцепляется reader на исчерпанном deadline:
++                    # значит сделать backend НЕзакрываемым навсегда. Отцепляем:
+                     # prewarm — daemon, он не владеет ни reader-ом, ни handle БД,
+                     # только читает ФС, и умирает вместе с процессом.
+                     report.forced = True
+@@ -343,13 +341,6 @@ class InlineSandboxBackend:
+                 self._state = "closed"
          return report
  
 -    @staticmethod
@@ -141,7 +163,7 @@ index f29d540..21cf164 100644
  
      def _compute_prefixes(self) -> tuple[list[str], str]:
 diff --git a/src/rlm_tools_bsl/server.py b/src/rlm_tools_bsl/server.py
-index 19b2efb..508003c 100644
+index 8539b8a..c616f44 100644
 --- a/src/rlm_tools_bsl/server.py
 +++ b/src/rlm_tools_bsl/server.py
 @@ -1,4 +1,5 @@
@@ -150,10 +172,10 @@ index 19b2efb..508003c 100644
  import importlib.metadata
  import json
  import logging
-@@ -619,6 +620,34 @@ def _rlm_start(
-     execution_timeout_seconds: int = 45,
-     include_metadata: bool = False,
+@@ -885,6 +886,38 @@ def _rlm_start(
      project: str | None = None,
+     domains: list[str] | str | None = None,
+     require_domains: bool = False,
 +) -> str:
 +    with ExitStack() as startup_scope:
 +        return _rlm_start_owned(
@@ -166,6 +188,8 @@ index 19b2efb..508003c 100644
 +            execution_timeout_seconds=execution_timeout_seconds,
 +            include_metadata=include_metadata,
 +            project=project,
++            domains=domains,
++            require_domains=require_domains,
 +            _startup_scope=startup_scope,
 +        )
 +
@@ -180,12 +204,14 @@ index 19b2efb..508003c 100644
 +    execution_timeout_seconds: int = 45,
 +    include_metadata: bool = False,
 +    project: str | None = None,
++    domains: list[str] | str | None = None,
++    require_domains: bool = False,
 +    *,
 +    _startup_scope: ExitStack,
  ) -> str:
      t0 = time.monotonic()
      with _sandboxes_lock:
-@@ -711,7 +740,7 @@ def _rlm_start(
+@@ -1006,7 +1039,7 @@ def _rlm_start(
      effort_config = EFFORT_LEVELS.get(effort, EFFORT_LEVELS["medium"])
  
      try:
@@ -194,7 +220,7 @@ index 19b2efb..508003c 100644
              path=resolved,
              query=query,
              max_output_chars=max_output_chars,
-@@ -721,6 +750,8 @@ def _rlm_start(
+@@ -1016,6 +1049,8 @@ def _rlm_start(
      except RuntimeError as e:
          return json.dumps({"error": str(e)}, ensure_ascii=False)
  
@@ -203,16 +229,16 @@ index 19b2efb..508003c 100644
      try:
          from rlm_tools_bsl.cache import touch_project_cache
  
-@@ -1364,6 +1395,21 @@ def _rlm_execute(
-     code: str,
+@@ -1766,6 +1801,22 @@ def _rlm_execute(
      detail_level: Literal["compact", "usage", "full"] = "compact",
      max_new_variables: int = 20,
+     domains: list[str] | str | None = None,
 +) -> str:
 +    lease = session_manager.acquire(session_id)
 +    if lease is None:
 +        return json.dumps({"error": f"Session '{session_id}' not found or expired"}, ensure_ascii=False)
 +    with lease as session:
-+        return _rlm_execute_owned(session_id, code, detail_level, max_new_variables, session=session)
++        return _rlm_execute_owned(session_id, code, detail_level, max_new_variables, domains, session=session)
 +
 +
 +def _rlm_execute_owned(
@@ -220,12 +246,13 @@ index 19b2efb..508003c 100644
 +    code: str,
 +    detail_level: Literal["compact", "usage", "full"] = "compact",
 +    max_new_variables: int = 20,
++    domains: list[str] | str | None = None,
 +    *,
 +    session,
  ) -> str:
      t0 = time.monotonic()
      logger.info("rlm_execute: session=%s code_len=%d", session_id, len(code))
-@@ -1371,10 +1417,6 @@ def _rlm_execute(
+@@ -1773,10 +1824,6 @@ def _rlm_execute(
      # Сильные локальные ссылки на session/backend до конца ответа (§9.1.2):
      # после снятия из registries активный execute завершает controlled response
      # на этих же объектах и не ищет их повторно.
@@ -237,7 +264,7 @@ index 19b2efb..508003c 100644
          backend = _sandboxes.get(session_id)
      if not backend:
 diff --git a/src/rlm_tools_bsl/session.py b/src/rlm_tools_bsl/session.py
-index 033e46d..805be02 100644
+index 8d1230c..b821d0d 100644
 --- a/src/rlm_tools_bsl/session.py
 +++ b/src/rlm_tools_bsl/session.py
 @@ -23,6 +23,7 @@ class Session:
@@ -247,9 +274,9 @@ index 033e46d..805be02 100644
 +    _operation_pins: int = field(default=0, repr=False, compare=False)
      # v1.29.0 §9.1: сериализация двух rlm_execute ОДНОЙ сессии. Держится только
      # исполняющим путём _rlm_execute; rlm_end/TTL-eviction/shutdown его НИКОГДА
-     # не берут (иначе teardown ждал бы пользовательский timeout до 300с).
-@@ -30,6 +31,30 @@ class Session:
-     execution_lock: threading.RLock = field(default_factory=threading.RLock, repr=False, compare=False)
+     # не ждут (иначе teardown ждал бы пользовательский timeout до 300с). v1.41.0:
+@@ -54,6 +55,30 @@ class Session:
+     domains_added: int = 0
  
  
 +class SessionLease:
@@ -279,7 +306,7 @@ index 033e46d..805be02 100644
  class SessionManager:
      def __init__(
          self,
-@@ -69,24 +94,56 @@ class SessionManager:
+@@ -93,24 +118,56 @@ class SessionManager:
          max_llm_calls: int = 50,
          max_execute_calls: int = 50,
      ) -> str:
@@ -338,7 +365,7 @@ index 033e46d..805be02 100644
  
      def get(self, session_id: str) -> Session | None:
          with self._lock:
-@@ -123,6 +180,8 @@ class SessionManager:
+@@ -147,6 +204,8 @@ class SessionManager:
          now = time.time()
          expired: list[str] = []
          for sid, s in self._sessions.items():
@@ -349,10 +376,10 @@ index 033e46d..805be02 100644
                  expired.append(sid)
 diff --git a/tests/test_unica_lifecycle_contract.py b/tests/test_unica_lifecycle_contract.py
 new file mode 100644
-index 0000000..418b190
+index 0000000..36af599
 --- /dev/null
 +++ b/tests/test_unica_lifecycle_contract.py
-@@ -0,0 +1,420 @@
+@@ -0,0 +1,427 @@
 +"""Owned #1119 deadline/owner contract; real SDK/backend paths, no replacement engine."""
 +
 +import json
@@ -466,6 +493,13 @@ index 0000000..418b190
 +            return self
 +
 +        def __exit__(self, *exc):
++            original_lock.release()
++
++        # rlm_end probes the lane without waiting; only the queued entry is observed.
++        def acquire(self, *args, **kwargs):
++            return original_lock.acquire(*args, **kwargs)
++
++        def release(self):
 +            original_lock.release()
 +
 +    session.execution_lock = ObservedExecutionLock()

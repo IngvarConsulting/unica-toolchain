@@ -76,9 +76,9 @@ class RepositoryContractTests(unittest.TestCase):
         expected = {
             "rlm-tools-bsl": (
                 "release",
-                "v1.33.0",
-                "3e6920cd015a61af4ba7aa1a5f1fedd8bc935549",
-                "rlm-tools-bsl-v1.33.0-build.4",
+                "v1.42.0",
+                "9a84f24f0c156630e1d4e757b30070a13a56d0e0",
+                "rlm-tools-bsl-v1.42.0-build.1",
             ),
             "bsl-analyzer": (
                 "release",

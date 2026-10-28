@@ -1,13 +1,12 @@
 {
   "schemaVersion": 3,
   "name": "bsl-analyzer",
-  "version": "0.2.86",
   "buildRevision": 1,
   "source": {
-    "kind": "release",
-    "repository": "https://github.com/itrous/bsl-analyzer",
-    "ref": "v0.2.86",
-    "commit": "53d8765288adf3b9277b7a4112dba167e51690b7"
+    "kind": "nightly",
+    "repository": "https://github.com/korolevpavel/bsl-analyzer",
+    "ref": "2422fd0acedb44cb7ff0d3fd123c4b23d87c2755",
+    "commit": "2422fd0acedb44cb7ff0d3fd123c4b23d87c2755"
   },
   "license": {
     "spdx": "LGPL-3.0-or-later",

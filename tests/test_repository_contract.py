@@ -194,7 +194,7 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("rlm-standalone-smoke:", text)
         self.assertIn("runs-on: ${{ matrix.runner }}", text)
         self.assertIn("fail-fast: false", text)
-        self.assertIn("macos-14", text)
+        self.assertIn("macos-15", text)
         self.assertIn("ubuntu-latest", text)
         self.assertIn("windows-latest", text)
         self.assertIn('python-version: "3.12.10"', text)

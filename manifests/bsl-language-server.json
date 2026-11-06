@@ -53,7 +53,7 @@
   },
   "targets": {
     "darwin-arm64": {
-      "runner": "macos-14",
+      "runner": "macos-15",
       "targetTriple": "aarch64-apple-darwin",
       "exe": "",
       "systemSetup": "none",

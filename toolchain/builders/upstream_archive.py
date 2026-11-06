@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import shutil
 import stat
 import urllib.request
@@ -58,13 +57,7 @@ def verify_upstream_archive(path: Path, archive: UpstreamArchiveTargetSpec) -> N
             f"upstream archive {archive.name} checksum is {digest}, expected {archive.sha256}"
         )
     with zipfile.ZipFile(path) as opened:
-        names = {
-            str(_safe_member(info, archive.name))
-            for info in opened.infolist()
-            if not info.is_dir()
-        }
-        for info in opened.infolist():
-            _safe_member(info, archive.name)
+        names = {str(_safe_member(info, archive.name)) for info in opened.infolist()}
     if archive.binary not in names:
         raise SystemExit(f"upstream archive {archive.name} has no binary {archive.binary}")
 

@@ -79,7 +79,11 @@ class UpstreamArchiveVerificationTests(unittest.TestCase):
             verify_upstream_archive(self.archive, describe(self.archive))
 
     def test_refuses_members_that_leave_the_destination(self) -> None:
-        for name in ("../evil", "/evil", "tool/../../evil", "C:/evil", "tool\\evil"):
+        names = ["../evil", "/evil", "tool/../../evil", "C:/evil"]
+        if os.sep != "\\":
+            # On Windows zipfile itself turns the backslash into a separator.
+            names.append("tool\\evil")
+        for name in names:
             with self.subTest(name=name):
                 write_zip(self.archive, {BINARY: b"run", name: b"x"})
                 with self.assertRaisesRegex(SystemExit, "unsafe member"):

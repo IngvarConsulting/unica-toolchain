@@ -21,11 +21,17 @@ from toolchain.builders.python_pyinstaller import (  # noqa: E402
 from toolchain.builders.python_nuitka_standalone import (  # noqa: E402
     build_python_nuitka_standalone,
 )
+from toolchain.builders.upstream_archive import (  # noqa: E402
+    build_upstream_archive,
+    materialize_upstream_archive,
+    upstream_archive_url,
+)
 from toolchain.manifest import (  # noqa: E402
     CargoBuilderSpec,
     PythonBuilderSpec,
     PythonNuitkaStandaloneSpec,
     ToolManifest,
+    UpstreamArchiveSpec,
     expected_release_files,
     load_manifest,
     release_tag,
@@ -57,6 +63,8 @@ def builder_versions(manifest: ToolManifest) -> dict[str, str]:
             "uv": manifest.builder.uv_version,
             "nuitka": manifest.builder.nuitka_version,
         }
+    if isinstance(manifest.builder, UpstreamArchiveSpec):
+        return {}
     raise SystemExit(f"unsupported builder: {manifest.builder}")
 
 
@@ -79,6 +87,13 @@ def builder_identity(
             raise SystemExit("observed Nuitka builder is missing compiler identity")
         return observed
     identity: dict = {"kind": manifest.builder.kind, **builder_versions(manifest)}
+    if isinstance(manifest.builder, UpstreamArchiveSpec):
+        archive = manifest.builder.archives[target_key]
+        identity["upstreamArchive"] = {
+            "url": upstream_archive_url(manifest, archive),
+            "sha256": archive.sha256,
+            "size": archive.size,
+        }
     if isinstance(manifest.builder, PythonBuilderSpec) and target_key == "win-x64":
         identity["stdio"] = dict(WINDOWS_STDIO_POLICY)
     return identity
@@ -130,7 +145,7 @@ def validate_source(
 ) -> None:
     shutil.rmtree(work_dir, ignore_errors=True)
     prepared = _prepare(manifest, repo_root, work_dir)
-    copied = copy_license_assets(manifest, prepared, out_dir)
+    copied = copy_license_assets(manifest, prepared, out_dir, repo_root=repo_root)
     print(
         json.dumps(
             {
@@ -181,6 +196,14 @@ def _smoke(
         by_base = {
             name: materialized[relative]
             for name, relative in validated.manifest.entrypoints.items()
+        }
+    elif isinstance(manifest.builder, UpstreamArchiveSpec):
+        if smoke_root is None:
+            raise SystemExit("upstream archive smoke requires an isolated destination")
+        by_base = {
+            manifest.builder.binaries[0].asset_base: materialize_upstream_archive(
+                assets[0], manifest.builder.archives[target_key], smoke_root
+            )
         }
     else:
         by_name = {path.name: path for path in assets}
@@ -254,6 +277,9 @@ def build(
         )
         assets = list(result.assets)
         observed_identity = result.builder_identity
+    elif isinstance(manifest.builder, UpstreamArchiveSpec):
+        assets = build_upstream_archive(manifest, target_key, prepared, out_dir, work_dir)
+        observed_identity = None
     else:
         raise SystemExit(f"unsupported builder: {manifest.builder}")
     _smoke(
@@ -261,7 +287,7 @@ def build(
         target_key,
         assets,
         smoke_root=(work_dir / "smoke-runtime")
-        if isinstance(manifest.builder, PythonNuitkaStandaloneSpec)
+        if isinstance(manifest.builder, (PythonNuitkaStandaloneSpec, UpstreamArchiveSpec))
         else None,
         expected_builder_identity=observed_identity,
     )

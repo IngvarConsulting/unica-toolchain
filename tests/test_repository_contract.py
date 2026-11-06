@@ -86,6 +86,12 @@ class RepositoryContractTests(unittest.TestCase):
                 "53d8765288adf3b9277b7a4112dba167e51690b7",
                 "bsl-analyzer-v0.2.86-build.1",
             ),
+            "bsl-language-server": (
+                "release",
+                "v1.0.7",
+                "f377f95aefa16a4cf0e4d9af5b1c83800366bebc",
+                "bsl-language-server-v1.0.7-build.1",
+            ),
         }
         for name, (kind, ref, commit, release) in expected.items():
             with self.subTest(name=name):
@@ -188,7 +194,7 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("rlm-standalone-smoke:", text)
         self.assertIn("runs-on: ${{ matrix.runner }}", text)
         self.assertIn("fail-fast: false", text)
-        self.assertIn("macos-14", text)
+        self.assertIn("macos-15", text)
         self.assertIn("ubuntu-latest", text)
         self.assertIn("windows-latest", text)
         self.assertIn('python-version: "3.12.10"', text)

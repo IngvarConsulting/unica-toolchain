@@ -183,32 +183,11 @@ class RepositoryContractTests(unittest.TestCase):
                     unpinned.append(f"{workflow.name}: {action}@{ref}")
         self.assertEqual(unpinned, [])
 
-    def test_pull_request_ci_builds_and_smokes_frozen_rlm_archives_on_three_targets(self) -> None:
+    def test_pull_request_ci_does_not_build_or_run_rlm(self) -> None:
         text = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-        self.assertIn("rlm-standalone-smoke:", text)
-        self.assertIn("runs-on: ${{ matrix.runner }}", text)
-        self.assertIn("fail-fast: false", text)
-        self.assertIn("macos-14", text)
-        self.assertIn("ubuntu-latest", text)
-        self.assertIn("windows-latest", text)
-        self.assertIn('python-version: "3.12.10"', text)
-        self.assertIn("uses: astral-sh/setup-uv@", text)
-        self.assertIn('version: "0.11.29"', text)
-        self.assertIn(
-            "python scripts/toolchain.py build --manifest manifests/rlm-tools-bsl.json",
-            text,
-        )
-        self.assertIn('--target "${{ matrix.target }}"', text)
-        self.assertIn("Emit target provenance and checksum", text)
-        self.assertIn(
-            'python -m json.tool "dist/ci-rlm-tools-bsl-${{ matrix.target }}/provenance-rlm-tools-bsl-${{ matrix.target }}.json"',
-            text,
-        )
-        self.assertIn(
-            'cat "dist/ci-rlm-tools-bsl-${{ matrix.target }}/checksums-rlm-tools-bsl-${{ matrix.target }}.txt"',
-            text,
-        )
-        self.assertNotIn("softprops/action-gh-release", text)
+        self.assertNotIn("rlm-source-runtime-tests:", text)
+        self.assertNotIn("rlm-standalone-smoke:", text)
+        self.assertNotIn("manifests/rlm-tools-bsl.json", text)
 
 
 if __name__ == "__main__":

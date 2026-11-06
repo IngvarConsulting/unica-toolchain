@@ -52,8 +52,7 @@ independently, so changing one manifest does not rebuild the others.
 3. Increment `buildRevision` when rebuilding the same release version or
    nightly source label.
 4. Open a pull request and wait for source, patch, license, schema, and workflow
-   validation. RLM changes also build and smoke the frozen Windows CLIs before
-   merge, including their captured nested help output.
+   validation.
 5. Merge the pull request, then manually run `Build tool release` on `main` with
    the manifest name (without `.json`).
 6. Verify the assets, checksums, provenance, and native smoke command before

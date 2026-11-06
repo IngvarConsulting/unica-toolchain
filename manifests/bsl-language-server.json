@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 3,
+  "name": "bsl-language-server",
+  "version": "1.0.7",
+  "buildRevision": 1,
+  "source": {
+    "kind": "release",
+    "repository": "https://github.com/1c-syntax/bsl-language-server",
+    "ref": "v1.0.7",
+    "commit": "f377f95aefa16a4cf0e4d9af5b1c83800366bebc"
+  },
+  "license": {
+    "spdx": "LGPL-3.0-or-later",
+    "files": [
+      {"path": "COPYING.md", "assetName": "license-bsl-language-server-LGPL.txt"},
+      {"path": "licenses/GPL-3.0.txt", "origin": "toolchain", "assetName": "license-bsl-language-server-GPL.txt"}
+    ]
+  },
+  "patches": [],
+  "builder": {
+    "kind": "upstream-release-archive",
+    "binaries": [
+      {
+        "package": "bsl-language-server",
+        "sourceName": "bsl-language-server",
+        "assetBase": "bsl-language-server",
+        "smokeArgs": ["--version"],
+        "smokeChecks": [
+          {"args": ["--version"], "expectedOutput": ["1.0.7"]}
+        ]
+      }
+    ],
+    "archives": {
+      "darwin-arm64": {
+        "name": "bsl-language-server_mac.zip",
+        "sha256": "c889da055738204817a140fae3e68429fae839060c6b5edcc3da4fe7a5eff53c",
+        "size": 166952981,
+        "binary": "bsl-language-server.app/Contents/MacOS/bsl-language-server"
+      },
+      "linux-x64": {
+        "name": "bsl-language-server_nix.zip",
+        "sha256": "af6ba0184e284aa866745b074510e001bae67c07cfe41e533b99f3cb5e71304e",
+        "size": 172422617,
+        "binary": "bsl-language-server/bin/bsl-language-server"
+      },
+      "win-x64": {
+        "name": "bsl-language-server_win.zip",
+        "sha256": "fed523e3b6d1d64c65a0df08ff74088c4d26eb3c550a2ff776c84ac2c8655c30",
+        "size": 168253085,
+        "binary": "bsl-language-server/bsl-language-server.exe"
+      }
+    }
+  },
+  "targets": {
+    "darwin-arm64": {
+      "runner": "macos-14",
+      "targetTriple": "aarch64-apple-darwin",
+      "exe": "",
+      "systemSetup": "none",
+      "environment": {}
+    },
+    "linux-x64": {
+      "runner": "ubuntu-latest",
+      "targetTriple": "x86_64-unknown-linux-gnu",
+      "exe": "",
+      "systemSetup": "none",
+      "environment": {}
+    },
+    "win-x64": {
+      "runner": "windows-latest",
+      "targetTriple": "x86_64-pc-windows-msvc",
+      "exe": ".exe",
+      "systemSetup": "none",
+      "environment": {}
+    }
+  }
+}

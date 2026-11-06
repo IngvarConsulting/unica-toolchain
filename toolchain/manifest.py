@@ -9,6 +9,7 @@ from typing import Any, Literal
 
 TARGET_KEYS = frozenset({"darwin-arm64", "linux-x64", "win-x64"})
 SYSTEM_SETUPS = frozenset({"none", "musl-tools"})
+LICENSE_ORIGINS = frozenset({"source", "toolchain"})
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 SEMVER = re.compile(
@@ -39,6 +40,7 @@ class PatchSpec:
 class LicenseFileSpec:
     path: str
     asset_name: str
+    origin: Literal["source", "toolchain"] = "source"
 
 
 @dataclass(frozen=True)
@@ -102,7 +104,27 @@ class PythonNuitkaStandaloneSpec:
     binaries: tuple[BinarySpec, ...]
 
 
-BuilderSpec = CargoBuilderSpec | PythonBuilderSpec | PythonNuitkaStandaloneSpec
+@dataclass(frozen=True)
+class UpstreamArchiveTargetSpec:
+    name: str
+    sha256: str
+    size: int
+    binary: str
+
+
+@dataclass(frozen=True)
+class UpstreamArchiveSpec:
+    kind: Literal["upstream-release-archive"]
+    binaries: tuple[BinarySpec, ...]
+    archives: dict[str, UpstreamArchiveTargetSpec]
+
+
+BuilderSpec = (
+    CargoBuilderSpec
+    | PythonBuilderSpec
+    | PythonNuitkaStandaloneSpec
+    | UpstreamArchiveSpec
+)
 
 
 @dataclass(frozen=True)
@@ -218,13 +240,16 @@ def _load_license(value: Any) -> LicenseSpec:
     for index, item in enumerate(files_value):
         path = f"license.files[{index}]"
         entry = _object(item, path)
-        _fields(entry, path, required={"path", "assetName"})
+        _fields(entry, path, required={"path", "assetName"}, optional={"origin"})
         source_path = _string(entry["path"], f"{path}.path")
+        origin = entry.get("origin", "source")
+        if origin not in LICENSE_ORIGINS:
+            raise SystemExit(f"{path}.origin must be one of: {', '.join(sorted(LICENSE_ORIGINS))}")
         asset_name = _name(entry["assetName"], f"{path}.assetName")
         if asset_name in release_names:
             raise SystemExit(f"duplicate license assetName: {asset_name}")
         release_names.add(asset_name)
-        files.append(LicenseFileSpec(source_path, asset_name))
+        files.append(LicenseFileSpec(source_path, asset_name, origin))
     return LicenseSpec(_string(data["spdx"], "license.spdx"), tuple(files))
 
 
@@ -296,6 +321,33 @@ def _load_binaries(
     return binaries
 
 
+def _load_upstream_archives(value: Any) -> dict[str, UpstreamArchiveTargetSpec]:
+    data = _object(value, "builder.archives")
+    if set(data) != TARGET_KEYS:
+        raise SystemExit(f"builder.archives must cover: {', '.join(sorted(TARGET_KEYS))}")
+    result: dict[str, UpstreamArchiveTargetSpec] = {}
+    for key, item in data.items():
+        path = f"builder.archives.{key}"
+        archive = _object(item, path)
+        _fields(archive, path, required={"name", "sha256", "size", "binary"})
+        digest = _string(archive["sha256"], f"{path}.sha256")
+        if not SHA256.fullmatch(digest):
+            raise SystemExit(f"{path}.sha256 must be 64 lowercase hexadecimal characters")
+        size = archive["size"]
+        if not isinstance(size, int) or isinstance(size, bool) or size < 1:
+            raise SystemExit(f"{path}.size must be a positive integer")
+        binary = _string(archive["binary"], f"{path}.binary")
+        if binary.startswith("/") or "\\" in binary or ".." in binary.split("/"):
+            raise SystemExit(f"{path}.binary must be a relative archive path")
+        result[key] = UpstreamArchiveTargetSpec(
+            name=_name(archive["name"], f"{path}.name"),
+            sha256=digest,
+            size=size,
+            binary=binary,
+        )
+    return result
+
+
 def _load_builder(value: Any) -> BuilderSpec:
     data = _object(value, "builder")
     kind = data.get("kind")
@@ -356,6 +408,16 @@ def _load_builder(value: Any) -> BuilderSpec:
             binaries=_load_binaries(
                 data["binaries"], python=True, unique_sources=True
             ),
+        )
+    if kind == "upstream-release-archive":
+        _fields(data, "builder", required={"kind", "binaries", "archives"})
+        binaries = _load_binaries(data["binaries"], python=False)
+        if len(binaries) != 1:
+            raise SystemExit("builder.binaries must name exactly one binary per archive")
+        return UpstreamArchiveSpec(
+            kind="upstream-release-archive",
+            binaries=binaries,
+            archives=_load_upstream_archives(data["archives"]),
         )
     raise SystemExit(f"unsupported builder kind: {kind}")
 
@@ -418,6 +480,10 @@ def load_manifest(path: Path) -> ToolManifest:
     if not isinstance(root["buildRevision"], int) or root["buildRevision"] < 1:
         raise SystemExit("buildRevision must be a positive integer")
     source = _load_source(root["source"])
+    builder = _load_builder(root["builder"])
+    patches = _load_patches(root["patches"])
+    if isinstance(builder, UpstreamArchiveSpec) and patches:
+        raise SystemExit("upstream-release-archive publishes the archive unchanged: patches must be empty")
     version_value = root.get("version")
     if source.kind == "release":
         if version_value is None:
@@ -438,8 +504,8 @@ def load_manifest(path: Path) -> ToolManifest:
         build_revision=root["buildRevision"],
         source=source,
         license=_load_license(root["license"]),
-        patches=_load_patches(root["patches"]),
-        builder=_load_builder(root["builder"]),
+        patches=patches,
+        builder=builder,
         targets=_load_targets(root["targets"]),
     )
 
@@ -461,6 +527,8 @@ def expected_target_asset_names(
         raise SystemExit(f"unknown target {target_key}")
     if isinstance(manifest.builder, PythonNuitkaStandaloneSpec):
         return {f"{manifest.name}-{target_key}.tar.gz"}
+    if isinstance(manifest.builder, UpstreamArchiveSpec):
+        return {manifest.builder.archives[target_key].name}
     target = manifest.targets[target_key]
     return {
         f"{binary.asset_base}-{target_key}{target.exe}"

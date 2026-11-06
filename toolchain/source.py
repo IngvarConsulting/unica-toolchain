@@ -116,14 +116,25 @@ def copy_license_assets(
     manifest: ToolManifest,
     source: PreparedSource,
     out_dir: Path,
+    *,
+    repo_root: Path | None = None,
 ) -> list[Path]:
     source_root = source.path.resolve()
     out_dir.mkdir(parents=True, exist_ok=True)
     copied: list[Path] = []
     for license_file in manifest.license.files:
-        candidate = (source_root / license_file.path).resolve()
+        # A license text the upstream tree does not carry, such as the GPL that
+        # the LGPL incorporates, is kept under this repository's `licenses/`.
+        if license_file.origin == "toolchain":
+            if repo_root is None:
+                raise SystemExit(f"license needs the toolchain root: {license_file.path}")
+            root = (repo_root.resolve() / "licenses").resolve()
+            candidate = (repo_root.resolve() / license_file.path).resolve()
+        else:
+            root = source_root
+            candidate = (source_root / license_file.path).resolve()
         try:
-            candidate.relative_to(source_root)
+            candidate.relative_to(root)
         except ValueError as exc:
             raise SystemExit(f"license path escapes source tree: {license_file.path}") from exc
         if not candidate.is_file():

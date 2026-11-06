@@ -6,8 +6,13 @@ Reproducible native builds of third-party tools distributed with
 This repository owns the part of the supply chain that starts from a pinned
 upstream source revision and ends with immutable, checksummed native release
 assets. It is intentionally not tied to one upstream project: the current
-manifests cover `rlm-tools-bsl` and `bsl-analyzer`, and the same
-contract can be extended to other Cargo or Python/PyInstaller tools.
+manifests cover `rlm-tools-bsl`, `bsl-analyzer` and `bsl-language-server`, and
+the same contract can be extended to other Cargo or Python/PyInstaller tools.
+
+`bsl-language-server` is not rebuilt: its archives bundle a Java runtime for
+each platform. The `upstream-release-archive` builder downloads the publisher's
+archive from the release of the pinned source tag, checks its size and SHA-256,
+runs the smoke command on the native runner and publishes the same bytes.
 
 Previously published `v8-runner` releases remain immutable historical
 artifacts in this repository. New `v8-runner` binaries are built and published
@@ -27,7 +32,7 @@ there is no active runner manifest here.
 - Python dependencies come from an upstream frozen `uv.lock`; Cargo builds use
   the upstream lock file through `cargo build --locked`.
 - Each target produces normalized executable names, checksums, license assets,
-  and machine-readable provenance.
+  and machine-readable provenance. An upstream archive keeps its published name.
 - A release is rejected if its tag already exists or if its file set differs
   from the manifest-derived contract.
 - Consumers pin an immutable toolchain release tag and SHA-256; they never

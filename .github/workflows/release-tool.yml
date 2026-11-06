@@ -192,7 +192,7 @@ jobs:
             exit 1
           fi
       - name: Attest native executables
-        if: needs.metadata.outputs.builder_kind != 'python-nuitka-standalone'
+        if: needs.metadata.outputs.builder_kind == 'cargo' || needs.metadata.outputs.builder_kind == 'python-pyinstaller'
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
           subject-path: |
@@ -204,12 +204,17 @@ jobs:
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
           subject-path: dist/*.tar.gz
+      - name: Attest upstream archives
+        if: needs.metadata.outputs.builder_kind == 'upstream-release-archive'
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-path: dist/*.zip
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           tag_name: ${{ needs.metadata.outputs.release_tag }}
           name: ${{ needs.metadata.outputs.release_tag }}
           body: |
-            Pinned native build produced by IngvarConsulting/unica-toolchain.
+            Pinned release produced by IngvarConsulting/unica-toolchain.
 
             See the per-target provenance JSON and checksum files attached to this release.
           make_latest: false

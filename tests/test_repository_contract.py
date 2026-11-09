@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import re
 import subprocess
 import tempfile
@@ -9,7 +8,6 @@ from pathlib import Path
 
 from toolchain.manifest import (
     CargoBuilderSpec,
-    PythonNuitkaStandaloneSpec,
     expected_asset_names,
     load_manifest,
     release_tag,
@@ -43,16 +41,17 @@ class RepositoryContractTests(unittest.TestCase):
             if attributes.exists():
                 (source / ".gitattributes").write_bytes(attributes.read_bytes())
             (source / "ordinary.txt").write_bytes(b"first\nsecond\n")
-            patches = [
-                patch
+            # Every pinned patch, or one LF patch standing for future ones
+            # when no manifest carries patches.
+            patches = {
+                patch.path: (REPO_ROOT / patch.path).read_bytes()
                 for manifest_path in sorted(MANIFESTS.glob("*.json"))
                 for patch in load_manifest(manifest_path).patches
-            ]
-            self.assertTrue(patches)
-            for patch in patches:
-                destination = source / patch.path
+            } or {"patches/example/0001-example.patch": b"--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n"}
+            for path, content in patches.items():
+                destination = source / path
                 destination.parent.mkdir(parents=True, exist_ok=True)
-                destination.write_bytes((REPO_ROOT / patch.path).read_bytes())
+                destination.write_bytes(content)
             run("add", ".")
             run(
                 "-c", "user.name=CI", "-c", "user.email=ci@example.invalid",
@@ -62,24 +61,15 @@ class RepositoryContractTests(unittest.TestCase):
             self.assertEqual(
                 (checkout / "ordinary.txt").read_bytes(), b"first\r\nsecond\r\n",
             )
-            for patch in patches:
-                with self.subTest(patch=patch.path):
-                    self.assertEqual(
-                        hashlib.sha256((checkout / patch.path).read_bytes()).hexdigest(),
-                        patch.sha256,
-                    )
+            for path, content in patches.items():
+                with self.subTest(patch=path):
+                    self.assertEqual((checkout / path).read_bytes(), content)
 
     def test_v8_runner_is_historical_not_an_active_manifest(self) -> None:
         self.assertFalse((MANIFESTS / "v8-runner.json").exists())
 
     def test_checked_in_tools_have_independent_release_identities(self) -> None:
         expected = {
-            "rlm-tools-bsl": (
-                "release",
-                "v1.42.0",
-                "9a84f24f0c156630e1d4e757b30070a13a56d0e0",
-                "rlm-tools-bsl-v1.42.0-build.1",
-            ),
             "bsl-analyzer": (
                 "release",
                 "v0.4.5",
@@ -94,13 +84,7 @@ class RepositoryContractTests(unittest.TestCase):
                 self.assertEqual(manifest.source.ref, ref)
                 self.assertEqual(manifest.source.commit, commit)
                 self.assertEqual(release_tag(manifest), release)
-                self.assertEqual(
-                    tuple(patch.path for patch in manifest.patches),
-                    (
-                        "patches/rlm-tools-bsl/0001-owned-lifecycle.patch",
-                        "patches/rlm-tools-bsl/0002-owned-test-fixtures.patch",
-                    ) if name == "rlm-tools-bsl" else (),
-                )
+                self.assertEqual(manifest.patches, ())
                 license_names = [item.asset_name for item in manifest.license.files]
                 self.assertEqual(len(license_names), len(set(license_names)))
 
@@ -119,23 +103,13 @@ class RepositoryContractTests(unittest.TestCase):
             },
         )
 
-    def test_rlm_pins_nuitka_builder_and_one_archive_per_target(self) -> None:
-        manifest = self.load("rlm-tools-bsl")
-
-        self.assertIsInstance(manifest.builder, PythonNuitkaStandaloneSpec)
-        self.assertEqual(manifest.builder.python_version, "3.12.10")
-        self.assertEqual(manifest.builder.uv_version, "0.11.29")
-        self.assertEqual(manifest.builder.nuitka_version, "4.1.3")
-        self.assertEqual(manifest.builder.include_package, "rlm_tools_bsl")
-        self.assertEqual(
-            [binary.module for binary in manifest.builder.binaries],
-            ["rlm_tools_bsl.cli", "rlm_tools_bsl.server"],
-        )
-        self.assertEqual(len(expected_asset_names(manifest)), 3)
-
-    def test_rlm_only_implementation_is_removed(self) -> None:
+    def test_rlm_is_not_built_here(self) -> None:
         self.assertFalse((REPO_ROOT / "scripts" / "build_rlm.py").exists())
         self.assertFalse((REPO_ROOT / "tests" / "test_build_rlm.py").exists())
+        self.assertFalse((MANIFESTS / "rlm-tools-bsl.json").exists())
+        self.assertFalse((REPO_ROOT / "patches" / "rlm-tools-bsl").exists())
+        ci = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertNotIn("rlm", ci.lower())
 
     def test_internal_superpowers_documents_are_not_published(self) -> None:
         self.assertFalse((REPO_ROOT / "docs" / "superpowers").exists())
@@ -158,8 +132,9 @@ class RepositoryContractTests(unittest.TestCase):
         self.assertIn("refs/tags/", text)
         self.assertIn("expected_release_files", text)
         self.assertIn("actions/attest-build-provenance@", text)
-        self.assertIn("dist/*.tar.gz", text)
-        self.assertIn("python-nuitka-standalone", text)
+        self.assertNotIn("dist/*.tar.gz", text)
+        self.assertNotIn("setup-uv", text)
+        self.assertNotIn("python-nuitka-standalone", text)
         self.assertIn("softprops/action-gh-release@", text)
         self.assertIn("make_latest: false", text)
 
@@ -182,33 +157,6 @@ class RepositoryContractTests(unittest.TestCase):
                 if re.fullmatch(r"[0-9a-f]{40}", ref) is None:
                     unpinned.append(f"{workflow.name}: {action}@{ref}")
         self.assertEqual(unpinned, [])
-
-    def test_pull_request_ci_builds_and_smokes_frozen_rlm_archives_on_three_targets(self) -> None:
-        text = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-        self.assertIn("rlm-standalone-smoke:", text)
-        self.assertIn("runs-on: ${{ matrix.runner }}", text)
-        self.assertIn("fail-fast: false", text)
-        self.assertIn("macos-14", text)
-        self.assertIn("ubuntu-latest", text)
-        self.assertIn("windows-latest", text)
-        self.assertIn('python-version: "3.12.10"', text)
-        self.assertIn("uses: astral-sh/setup-uv@", text)
-        self.assertIn('version: "0.11.29"', text)
-        self.assertIn(
-            "python scripts/toolchain.py build --manifest manifests/rlm-tools-bsl.json",
-            text,
-        )
-        self.assertIn('--target "${{ matrix.target }}"', text)
-        self.assertIn("Emit target provenance and checksum", text)
-        self.assertIn(
-            'python -m json.tool "dist/ci-rlm-tools-bsl-${{ matrix.target }}/provenance-rlm-tools-bsl-${{ matrix.target }}.json"',
-            text,
-        )
-        self.assertIn(
-            'cat "dist/ci-rlm-tools-bsl-${{ matrix.target }}/checksums-rlm-tools-bsl-${{ matrix.target }}.txt"',
-            text,
-        )
-        self.assertNotIn("softprops/action-gh-release", text)
 
 
 if __name__ == "__main__":

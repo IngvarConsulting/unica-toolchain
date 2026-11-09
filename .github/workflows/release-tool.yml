@@ -20,8 +20,6 @@ jobs:
       release_tag: ${{ steps.describe.outputs.release_tag }}
       matrix: ${{ steps.describe.outputs.matrix }}
       builder_kind: ${{ steps.describe.outputs.builder_kind }}
-      python_version: ${{ steps.describe.outputs.python_version }}
-      uv_version: ${{ steps.describe.outputs.uv_version }}
       rust_version: ${{ steps.describe.outputs.rust_version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -50,8 +48,6 @@ jobs:
               "release_tag": data["releaseTag"],
               "matrix": json.dumps(data["matrix"], separators=(",", ":")),
               "builder_kind": data["builderKind"],
-              "python_version": versions.get("python", "3.12"),
-              "uv_version": versions.get("uv", ""),
               "rust_version": versions.get("rust", ""),
           }
           with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8", newline="\n") as stream:
@@ -101,12 +97,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: ${{ needs.metadata.outputs.python_version }}
-      - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
-        if: needs.metadata.outputs.builder_kind == 'python-pyinstaller' || needs.metadata.outputs.builder_kind == 'python-nuitka-standalone'
-        with:
-          version: ${{ needs.metadata.outputs.uv_version }}
-          enable-cache: false
+          python-version: "3.12"
       - name: Install exact Rust toolchain
         if: needs.metadata.outputs.builder_kind == 'cargo'
         shell: bash
@@ -192,18 +183,12 @@ jobs:
             exit 1
           fi
       - name: Attest native executables
-        if: needs.metadata.outputs.builder_kind != 'python-nuitka-standalone'
         uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
         with:
           subject-path: |
             dist/*-darwin-arm64
             dist/*-linux-x64
             dist/*-win-x64.exe
-      - name: Attest standalone runtime archives
-        if: needs.metadata.outputs.builder_kind == 'python-nuitka-standalone'
-        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
-        with:
-          subject-path: dist/*.tar.gz
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           tag_name: ${{ needs.metadata.outputs.release_tag }}

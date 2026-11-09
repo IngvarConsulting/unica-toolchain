@@ -6,8 +6,11 @@ Reproducible native builds of third-party tools distributed with
 This repository owns the part of the supply chain that starts from a pinned
 upstream source revision and ends with immutable, checksummed native release
 assets. It is intentionally not tied to one upstream project: the current
-manifests cover `rlm-tools-bsl` and `bsl-analyzer`, and the same
-contract can be extended to other Cargo or Python/PyInstaller tools.
+manifest covers `bsl-analyzer`, and the same contract can be extended to
+other Cargo tools.
+
+Previously published `rlm-tools-bsl` releases remain immutable historical
+artifacts in this repository; RLM is no longer built here.
 
 Previously published `v8-runner` releases remain immutable historical
 artifacts in this repository. New `v8-runner` binaries are built and published
@@ -24,8 +27,7 @@ there is no active runner manifest here.
   output assertions, and toolchain build revision.
 - Optional repository-owned patches are applied in manifest order and verified
   by SHA-256 before any build starts.
-- Python dependencies come from an upstream frozen `uv.lock`; Cargo builds use
-  the upstream lock file through `cargo build --locked`.
+- Cargo builds use the upstream lock file through `cargo build --locked`.
 - Each target produces normalized executable names, checksums, license assets,
   and machine-readable provenance.
 - A release is rejected if its tag already exists or if its file set differs
@@ -52,8 +54,7 @@ independently, so changing one manifest does not rebuild the others.
 3. Increment `buildRevision` when rebuilding the same release version or
    nightly source label.
 4. Open a pull request and wait for source, patch, license, schema, and workflow
-   validation. RLM changes also build and smoke the frozen Windows CLIs before
-   merge, including their captured nested help output.
+   validation.
 5. Merge the pull request, then manually run `Build tool release` on `main` with
    the manifest name (without `.json`).
 6. Verify the assets, checksums, provenance, and native smoke command before

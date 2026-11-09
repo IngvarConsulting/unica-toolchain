@@ -72,9 +72,9 @@ class RepositoryContractTests(unittest.TestCase):
         expected = {
             "bsl-analyzer": (
                 "release",
-                "v0.2.86",
-                "53d8765288adf3b9277b7a4112dba167e51690b7",
-                "bsl-analyzer-v0.2.86-build.1",
+                "v0.4.5",
+                "ffae37b25c910991ecb8f05abe7a8148cd32b45c",
+                "bsl-analyzer-v0.4.5-build.1",
             ),
         }
         for name, (kind, ref, commit, release) in expected.items():

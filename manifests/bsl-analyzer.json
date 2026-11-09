@@ -1,20 +1,17 @@
 {
   "schemaVersion": 3,
   "name": "bsl-analyzer",
-  "version": "0.2.86",
+  "version": "0.4.5",
   "buildRevision": 1,
   "source": {
     "kind": "release",
     "repository": "https://github.com/itrous/bsl-analyzer",
-    "ref": "v0.2.86",
-    "commit": "53d8765288adf3b9277b7a4112dba167e51690b7"
+    "ref": "v0.4.5",
+    "commit": "ffae37b25c910991ecb8f05abe7a8148cd32b45c"
   },
   "license": {
-    "spdx": "LGPL-3.0-or-later",
+    "spdx": "MIT",
     "files": [
-      {"path": "LICENSE-APACHE", "assetName": "license-bsl-analyzer-APACHE.txt"},
-      {"path": "LICENSE-GPL", "assetName": "license-bsl-analyzer-GPL.txt"},
-      {"path": "LICENSE-LGPL", "assetName": "license-bsl-analyzer-LGPL.txt"},
       {"path": "LICENSE-MIT", "assetName": "license-bsl-analyzer-MIT.txt"},
       {"path": "NOTICE", "assetName": "notice-bsl-analyzer.txt"}
     ]

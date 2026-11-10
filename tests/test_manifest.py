@@ -256,5 +256,20 @@ class ManifestTests(unittest.TestCase):
                     load_manifest(self.write_manifest(data))
 
 
+class ReleasedManifestTests(unittest.TestCase):
+    def test_glibc_targets_build_on_a_fixed_runner_image(self) -> None:
+        # A gnu binary needs at least the glibc of the image that linked it. The floating
+        # `ubuntu-latest` raises that floor with every image bump: the 0.4.5 asset built on
+        # ubuntu-26.04 required GLIBC_2.43 and did not start on the consumers' Linux hosts.
+        manifests = sorted((Path(__file__).resolve().parents[1] / "manifests").glob("*.json"))
+        self.assertTrue(manifests)
+        for path in manifests:
+            targets = json.loads(path.read_text(encoding="utf-8"))["targets"]
+            for name, target in targets.items():
+                if target["targetTriple"].endswith("-linux-gnu"):
+                    with self.subTest(manifest=path.name, target=name):
+                        self.assertNotEqual(target["runner"], "ubuntu-latest")
+
+
 if __name__ == "__main__":
     unittest.main()

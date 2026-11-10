@@ -271,5 +271,15 @@ class ReleasedManifestTests(unittest.TestCase):
                         self.assertNotEqual(target["runner"], "ubuntu-latest")
 
 
+    def test_every_system_setup_has_a_workflow_step(self) -> None:
+        from toolchain.manifest import SYSTEM_SETUPS
+        workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/release-tool.yml").read_text(
+            encoding="utf-8"
+        )
+        for setup in SYSTEM_SETUPS - {"none"}:
+            with self.subTest(setup=setup):
+                self.assertIn(f"matrix.systemSetup == '{setup}'", workflow)
+
+
 if __name__ == "__main__":
     unittest.main()

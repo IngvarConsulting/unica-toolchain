@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 
 TARGET_KEYS = frozenset({"darwin-arm64", "linux-x64", "win-x64"})
-SYSTEM_SETUPS = frozenset({"none", "musl-tools"})
+SYSTEM_SETUPS = frozenset({"none", "musl-tools", "gcc-12"})
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 SEMVER = re.compile(
@@ -67,7 +67,7 @@ class TargetSpec:
     runner: str
     target_triple: str
     exe: str
-    system_setup: Literal["none", "musl-tools"]
+    system_setup: Literal["none", "musl-tools", "gcc-12"]
     environment: dict[str, str]
 
 

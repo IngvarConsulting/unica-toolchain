@@ -112,6 +112,12 @@ jobs:
       - name: Install musl build tools
         if: runner.os == 'Linux' && matrix.systemSetup == 'musl-tools'
         run: sudo apt-get update && sudo apt-get install -y musl-tools
+      # gcc-11 of ubuntu-22.04 does not know the avx512fp16 target attribute that the
+      # SIMD kernels of numkong (usearch) use. The compiler does not move the glibc floor:
+      # that is set by the image, so the build stays on 22.04 with a newer gcc.
+      - name: Install GCC 12
+        if: runner.os == 'Linux' && matrix.systemSetup == 'gcc-12'
+        run: sudo apt-get update && sudo apt-get install -y gcc-12 g++-12
       - name: Build and smoke declared assets
         shell: bash
         env:

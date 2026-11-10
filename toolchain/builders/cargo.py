@@ -22,6 +22,7 @@ def run_command(
     env: dict[str, str] | None = None,
 ) -> str:
     print("+", " ".join(command), flush=True)
+    # stderr goes to the job log: a failed compiler run must show its own error.
     result = subprocess.run(
         command,
         cwd=cwd,
@@ -29,7 +30,7 @@ def run_command(
         check=True,
         text=True,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=None,
     )
     return result.stdout.strip()
 
